@@ -1,0 +1,6 @@
+[ingot]
+name = "contract_demo"
+version = "0.1.0"
+
+[dependencies]
+fecheck = "../../ingots/fecheck"

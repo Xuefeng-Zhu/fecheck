@@ -22,7 +22,7 @@ jobs:
           echo "$HOME/.fe/bin" >> "$GITHUB_PATH"
       - run: fe --version
       - name: Format check
-        run: for d in ingots/fecheck examples/permissions examples/queue cli; do fe fmt --check "$d"; done
+        run: for d in ingots/fecheck examples/permissions examples/queue examples/contract cli; do fe fmt --check "$d"; done
       - name: Tests (EVM + native), CLI build and end-to-end checks
         run: ./scripts/test.sh
       - name: Demo

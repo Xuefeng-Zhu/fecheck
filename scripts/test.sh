@@ -14,7 +14,7 @@ echo "== compiler"
 "$FE" --version
 
 echo "== fe test (Sonatina / EVM backend)"
-for ingot in ingots/fecheck examples/permissions examples/queue; do
+for ingot in ingots/fecheck examples/permissions examples/queue examples/contract; do
     echo "-- $ingot"
     "$FE" test "$ingot"
 done

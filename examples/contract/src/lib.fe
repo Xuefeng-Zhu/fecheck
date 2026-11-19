@@ -1,0 +1,91 @@
+// Demo C: state-machine testing of a deployed EVM contract.
+//
+// The same permission bug as Demo A, but in a real Fe contract deployed into
+// the `fe test` EVM. The FeCheck engine runs unchanged: the test closure
+// declares `uses (evm: mut Evm)`, and `check` forwards that effect (`uses
+// F::E`), so every generated case and every shrink candidate deploys a fresh
+// contract and drives it with real message calls.
+
+use std::abi::sol
+use std::evm::{Evm, StorageMap}
+
+msg PermissionMsg {
+    #[selector = sol("grant(uint256)")]
+    Grant { agent: u256 },
+    #[selector = sol("revoke(uint256)")]
+    Revoke { agent: u256 },
+    #[selector = sol("execute(uint256)")]
+    Execute { agent: u256 } -> bool,
+}
+
+/// Remembers the last authorisation decision to save an SLOAD on repeats.
+/// BUG: `Revoke` does not clear the cached decision.
+pub contract CachedRegistry {
+    mut granted: StorageMap<u256, bool>,
+    mut cache_valid: bool,
+    mut cache_agent: u256,
+    mut cache_allowed: bool,
+
+    recv PermissionMsg {
+        Grant { agent } uses (mut granted, mut cache_valid) {
+            granted.set(key: agent, value: true)
+            cache_valid = false
+        }
+
+        Revoke { agent } uses (mut granted) {
+            granted.set(key: agent, value: false)
+        }
+
+        Execute { agent } -> bool uses (
+            granted,
+            mut cache_valid,
+            mut cache_agent,
+            mut cache_allowed,
+        ) {
+            if cache_valid && cache_agent == agent {
+                return cache_allowed
+            }
+            let allowed = granted.get(key: agent)
+            cache_valid = true
+            cache_agent = agent
+            cache_allowed = allowed
+            allowed
+        }
+    }
+}
+
+/// The same registry with the cache invalidated on revoke.
+pub contract FixedRegistry {
+    mut granted: StorageMap<u256, bool>,
+    mut cache_valid: bool,
+    mut cache_agent: u256,
+    mut cache_allowed: bool,
+
+    recv PermissionMsg {
+        Grant { agent } uses (mut granted, mut cache_valid) {
+            granted.set(key: agent, value: true)
+            cache_valid = false
+        }
+
+        Revoke { agent } uses (mut granted, mut cache_valid) {
+            granted.set(key: agent, value: false)
+            cache_valid = false
+        }
+
+        Execute { agent } -> bool uses (
+            granted,
+            mut cache_valid,
+            mut cache_agent,
+            mut cache_allowed,
+        ) {
+            if cache_valid && cache_agent == agent {
+                return cache_allowed
+            }
+            let allowed = granted.get(key: agent)
+            cache_valid = true
+            cache_agent = agent
+            cache_allowed = allowed
+            allowed
+        }
+    }
+}
