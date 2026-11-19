@@ -4,12 +4,15 @@ ok   [2] unknown command
 ok   [2] unknown test
 ok   [2] bad --seed
 ok   [2] --cases 0 is an invalid config
+ok   [2] largest --cases is rejected, not aborted
+ok   [2] --steps 0 is rejected (no vacuous pass)
+ok   [2] --steps above the maximum is rejected
 ok   [1] buggy permissions fail
 ok   [0] fixed permissions pass
 ok   [1] buggy queue fails
 ok   [0] fixed queue passes
 ok   [0] replay reproduces
-ok   [3] replay against fix does not
+ok   [3] replay against fix passes (exit 3 = fixed)
 ok   [0] queue replay reproduces
 ok   [3] queue replay against fix
 ok   [4] replay against wrong family
@@ -21,6 +24,19 @@ ok   [4] non-numeric choice
 ok   [4] edited op line is reported as drift
 ok   [4] unknown test identifier
 ok   [4] garbage file
+ok   [4] case missing its final operation is drift
+ok   [4] case with an extra operation is drift
+ok   [5] different failure exits 5, not 3
+ok   [1] 41-operation queue failure, --steps 80
+ok   long case records steps 80 and all 41 operations
+ok   [0] long case replay reproduces
+ok   [3] long case against fixed queue passes
+ok   [0] 0.1.0 case file reproduces
+ok   [3] 0.1.0 case file against fix passes
+ok   printed permissions regression compiles and passes on the fixed target
+ok   printed permissions regression fails (assertion, not compile error) on the buggy target
+ok   printed queue regression compiles and passes on the fixed target
+ok   printed queue regression fails (assertion, not compile error) on the buggy target
 ok   trace JSON parses
 ok   [0] scripted demo
 all CLI checks passed

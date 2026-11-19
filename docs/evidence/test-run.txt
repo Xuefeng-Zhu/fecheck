@@ -1,131 +1,165 @@
-== fe test ingots/fecheck
-PASS  [0.0001s] case_seeds_are_distinct
-PASS  [0.0003s] commands_apply_in_order
-PASS  [0.0011s] case_round_trips
-PASS  [0.0002s] different_seeds_differ
-PASS  [0.0004s] discarding_everything_gives_up
-PASS  [0.0018s] always_true_passes_all_cases
-PASS  [0.0002s] draws_past_budget_overrun
-PASS  [0.0001s] errors_are_classified_separately
-PASS  [0.0034s] int_range_bounds_and_shrink_target
-PASS  [0.0000s] invalid_config_is_rejected
-PASS  [0.0001s] known_failure_fails
-PASS  [0.0004s] malformed_cases_are_rejected
-PASS  [0.0001s] max_steps_is_respected
-PASS  [0.0002s] numeric_shrinks_to_boundary
-PASS  [0.0007s] one_of_and_pair
-PASS  [0.0001s] overrun_cases_are_discarded
-PASS  [0.0000s] parse_u64_edges
-PASS  [0.0001s] random_then_replay_regenerates_value
-PASS  [0.0001s] replay_clamps_and_pads_with_zero
-PASS  [0.0008s] replay_against_fix_no_longer_fails
-PASS  [0.0007s] replay_detects_a_different_failure
-PASS  [0.0007s] replay_detects_drift
-PASS  [0.0006s] replay_never_reads_an_error_as_success
-PASS  [0.0008s] replay_property_round_trip
-PASS  [0.0000s] same_seed_same_sequence
-PASS  [0.0006s] replay_reproduces_saved_failure
-PASS  [0.0001s] schema_error_reports_version
-PASS  [0.0000s] shortlex_order
-PASS  [0.0001s] shrinking_disabled_keeps_original
-PASS  [0.0004s] sequence_drops_irrelevant_elements
-PASS  [0.0002s] shrinking_keeps_the_failure_identity
-PASS  [0.0001s] shrinking_respects_budget
-PASS  [0.0003s] shrunk_case_still_fails
-PASS  [0.0000s] splitmix_reference_vector
-PASS  [0.0164s] machine_finds_and_shrinks
-PASS  [0.0101s] shrinking_is_deterministic
-PASS  [0.0009s] uint_range_bounds
-PASS  [0.0010s] up_to_respects_bounds_at_edges
-PASS  [0.0014s] vec_respects_max_len
-PASS  [0.0192s] rejected_commands_are_skipped_consistently
-PASS  [0.0113s] too_many_choices_are_rejected
-PASS  [0.0169s] signed_shrinks_toward_zero
-PASS  [0.0204s] sum_is_order_independent
-PASS  [0.0540s] every_run_starts_fresh
+# Clean clone of 5ede679, fe 26.6.0 x86-64 under qemu-user on an AArch64 host, 2026-11-19 PST
+# PATH=~/x86bin:$PATH FE=~/x86bin/fe SKIP_NATIVE_TESTS=1 BIN='qemu-x86_64 ... ./out/fecheck' ./scripts/test.sh
+== compiler
+fe 26.6.0 (5b3f96a)
+== fe test (Sonatina / EVM backend)
+-- ingots/fecheck
+PASS  [0.0212s] case_seeds_are_distinct
+PASS  [0.0175s] draws_past_budget_overrun
+PASS  [0.0120s] errors_are_classified_separately
+PASS  [0.0002s] huge_case_counts_are_rejected_not_aborted
+PASS  [0.0303s] discarding_everything_gives_up
+PASS  [0.0002s] invalid_config_is_rejected
+PASS  [0.0320s] different_seeds_differ
+PASS  [0.0362s] draw_weighted_certain_is_always_true
+PASS  [0.0414s] commands_apply_in_order
+PASS  [0.0151s] known_failure_fails
+PASS  [0.0190s] max_steps_is_respected
+PASS  [0.0255s] numeric_shrinks_to_boundary
+PASS  [0.0909s] always_true_passes_all_cases
+PASS  [0.0179s] overrun_cases_are_discarded
+PASS  [0.0019s] random_then_replay_regenerates_value
+PASS  [0.0644s] malformed_cases_are_rejected
+PASS  [0.1197s] case_round_trips
+PASS  [0.0876s] machine_finds_and_shrinks
+PASS  [0.0413s] parse_u64_edges
+PASS  [0.0170s] replay_clamps_and_pads_with_zero
+PASS  [0.1207s] one_of_and_pair
+PASS  [0.1060s] replay_against_fix_no_longer_fails
+PASS  [0.0839s] replay_detects_drift
+PASS  [0.0939s] replay_detects_a_different_failure
+PASS  [0.0871s] replay_never_reads_an_error_as_success
+PASS  [0.0092s] same_seed_same_sequence
+PASS  [0.0817s] replay_reproduces_saved_failure
+PASS  [0.0019s] schema_error_reports_version
+PASS  [0.1233s] replay_property_round_trip
+PASS  [0.0007s] shortlex_order
+PASS  [0.0014s] shrinking_disabled_keeps_original
+PASS  [0.1273s] replay_rejects_a_case_missing_its_last_op
+PASS  [0.1261s] schema_1_files_still_replay
+PASS  [0.0596s] sequence_drops_irrelevant_elements
+PASS  [0.0314s] shrinking_keeps_the_failure_identity
+PASS  [0.0191s] shrinking_respects_budget
+PASS  [0.0002s] splitmix_reference_vector
+PASS  [0.0002s] steps_settings_are_validated
+PASS  [0.0368s] shrunk_case_still_fails
+PASS  [0.4682s] int_range_bounds_and_shrink_target
+PASS  [0.1400s] signed_shrinks_toward_zero
+PASS  [0.3943s] replay_uses_recorded_steps_for_long_cases
+PASS  [0.1264s] uint_range_bounds
+PASS  [0.3493s] shrinking_is_deterministic
+PASS  [0.1774s] up_to_respects_bounds_at_edges
+PASS  [0.1717s] vec_respects_max_len
+PASS  [0.7156s] rejected_commands_are_skipped_consistently
+PASS  [0.6656s] too_many_choices_are_rejected
+PASS  [0.8636s] sum_is_order_independent
+PASS  [1.4650s] every_run_starts_fresh
 
-test result: ok. 44 passed; 0 failed
-== fe test examples/permissions
-PASS  [0.0001s] regression_stale_cache_fixed
-PASS  [0.0001s] regression_stale_cache_reproduces_on_cached
-PASS  [0.0066s] case_round_trip_and_replay
-PASS  [0.0099s] finds_stale_cache_bug
-PASS  [0.0229s] fixed_system_passes
+test result: ok. 50 passed; 0 failed
+-- examples/permissions
+PASS  [0.0254s] regression_stale_cache_fixed
+PASS  [0.0280s] regression_stale_cache_reproduces_on_cached
+PASS  [0.4279s] finds_stale_cache_bug
+PASS  [0.4760s] case_round_trip_and_replay
+PASS  [0.9501s] fixed_system_passes
 
 test result: ok. 5 passed; 0 failed
-== fe test examples/queue
-PASS  [0.0002s] regression_wraparound
-PASS  [0.0042s] round_trip_property
-PASS  [0.0015s] round_trip_property_finds_masked_bug
-PASS  [0.0254s] finds_wraparound_bug
-PASS  [0.0405s] mod_ring_passes_state_machine
+-- examples/queue
+PASS  [0.0413s] regression_wraparound
+PASS  [0.1597s] round_trip_property_finds_masked_bug
+PASS  [0.3287s] round_trip_property
+PASS  [0.8471s] finds_wraparound_bug
+PASS  [1.4795s] mod_ring_passes_state_machine
 
 test result: ok. 5 passed; 0 failed
-== fe test examples/contract
-PASS  [0.0144s] fixed_contract_passes
-PASS  [0.0165s] contract_bug_is_found_and_shrunk
+-- examples/contract
+PASS  [0.0417s] regression_stale_cache_fails_on_cached_registry
+PASS  [0.0426s] regression_stale_cache_passes_on_fixed_registry
+PASS  [0.6115s] contract_bug_is_found_and_shrunk
+PASS  [0.6150s] contract_counterexample_report
+PASS  [0.7305s] fixed_contract_passes
 
+test result: ok. 5 passed; 0 failed
+== FeCheck as a dependency of an ingot outside this repository
+== external ingot at /tmp/tmp.EE0TSMDpFc/my_project
+fecheck = { path = "../../clean/ingots/fecheck" }
+PASS  [0.0214s] regression_add_capped_wraps
+PASS  [0.0360s] fecheck_finds_and_shrinks_the_buggy_version
+PASS  [0.1507s] add_capped_never_exceeds_the_cap
+
+test result: ok. 3 passed; 0 failed
+== Demo C: EVM contract counterexample, end to end
+FeCheck - EVM contract test (fe test, Sonatina EVM)
+Property: a revoked agent can never execute; a granted agent always can
+Seed 12345: CachedRegistry failed on case 78 (77 passing cases before it; a fresh deployment each)
+Shrunk: 24 choices -> 12 choices after 225 candidates, each one a fresh deployment
+
+Minimized transaction sequence against CachedRegistry:
+  1. grant(1)     -> ok
+  2. execute(1)   -> expected true,  got true
+  3. revoke(1)    -> ok
+  4. execute(1)   -> expected false, got true   <-- violation
+Result on CachedRegistry: FAIL, code 1 (REVOKED_AGENT_EXECUTED)
+
+The same transactions against FixedRegistry:
+  1. grant(1)     -> ok
+  2. execute(1)   -> expected true,  got true
+  3. revoke(1)    -> ok
+  4. execute(1)   -> expected false, got false
+Result on FixedRegistry: PASS
+
+Shrunk case fails on CachedRegistry and passes on FixedRegistry: yes
+
+Checked-in regression (examples/contract/src/tests.fe), run against both contracts:
+PASS  [0.0270s] regression_stale_cache_fails_on_cached_registry
+PASS  [0.0274s] regression_stale_cache_passes_on_fixed_registry
 test result: ok. 2 passed; 0 failed
-== fe test --backend native ingots/fecheck
-PASS  [0.1376s] replay_clamps_and_pads_with_zero
-PASS  [0.1511s] case_seeds_are_distinct
-PASS  [0.1520s] same_seed_same_sequence
-PASS  [0.1792s] up_to_respects_bounds_at_edges
-PASS  [0.2135s] different_seeds_differ
-PASS  [0.2321s] splitmix_reference_vector
-PASS  [0.2407s] draws_past_budget_overrun
-PASS  [0.2536s] random_then_replay_regenerates_value
-PASS  [0.1483s] shortlex_order
-PASS  [0.1214s] int_range_bounds_and_shrink_target
-PASS  [0.1245s] vec_respects_max_len
-PASS  [0.1082s] always_true_passes_all_cases
-PASS  [0.1335s] uint_range_bounds
-PASS  [0.1256s] one_of_and_pair
-PASS  [0.1267s] discarding_everything_gives_up
-PASS  [0.1532s] errors_are_classified_separately
-PASS  [0.1308s] invalid_config_is_rejected
-PASS  [0.1142s] overrun_cases_are_discarded
-PASS  [0.1675s] numeric_shrinks_to_boundary
-PASS  [0.2958s] known_failure_fails
-PASS  [0.1425s] shrinking_keeps_the_failure_identity
-PASS  [0.2273s] signed_shrinks_toward_zero
-PASS  [0.2455s] sequence_drops_irrelevant_elements
-PASS  [0.2016s] shrunk_case_still_fails
-PASS  [0.2063s] shrinking_respects_budget
-PASS  [0.2213s] shrinking_disabled_keeps_original
-PASS  [0.1706s] shrinking_is_deterministic
-PASS  [0.1107s] commands_apply_in_order
-PASS  [0.1840s] sum_is_order_independent
-PASS  [0.1660s] machine_finds_and_shrinks
-PASS  [0.1414s] rejected_commands_are_skipped_consistently
-PASS  [0.2095s] every_run_starts_fresh
-PASS  [0.1399s] case_round_trips
-PASS  [0.1612s] schema_error_reports_version
-PASS  [0.1613s] malformed_cases_are_rejected
-PASS  [0.1483s] too_many_choices_are_rejected
-PASS  [0.2513s] max_steps_is_respected
-PASS  [0.1273s] replay_reproduces_saved_failure
-PASS  [0.1118s] replay_never_reads_an_error_as_success
-PASS  [0.1596s] replay_against_fix_no_longer_fails
-PASS  [0.1939s] parse_u64_edges
-PASS  [0.1806s] replay_detects_drift
-PASS  [0.1578s] replay_detects_a_different_failure
-PASS  [0.1407s] replay_property_round_trip
-
-test result: ok. 44 passed; 0 failed
-== fe test --backend native examples/permissions
-PASS  [0.0762s] regression_stale_cache_reproduces_on_cached
-PASS  [0.0896s] finds_stale_cache_bug
-PASS  [0.1119s] regression_stale_cache_fixed
-PASS  [0.1125s] case_round_trip_and_replay
-PASS  [0.1444s] fixed_system_passes
-
-test result: ok. 5 passed; 0 failed
-== fe test --backend native examples/queue
-PASS  [0.0705s] regression_wraparound
-PASS  [0.1052s] finds_wraparound_bug
-PASS  [0.1047s] round_trip_property_finds_masked_bug
-PASS  [0.1232s] round_trip_property
-PASS  [0.1252s] mod_ring_passes_state_machine
-
-test result: ok. 5 passed; 0 failed
+Rerun it yourself: fe test examples/contract --filter regression_stale_cache
+== skipping fe test --backend native (SKIP_NATIVE_TESTS=1)
+== build CLI
+Wrote out/fecheck_cli
+built out/fecheck
+== CLI checks
+ok   [0] list
+ok   [2] no arguments is a usage error
+ok   [2] unknown command
+ok   [2] unknown test
+ok   [2] bad --seed
+ok   [2] --cases 0 is an invalid config
+ok   [2] largest --cases is rejected, not aborted
+ok   [2] --steps 0 is rejected (no vacuous pass)
+ok   [2] --steps above the maximum is rejected
+ok   [1] buggy permissions fail
+ok   [0] fixed permissions pass
+ok   [1] buggy queue fails
+ok   [0] fixed queue passes
+ok   [0] replay reproduces
+ok   [3] replay against fix passes (exit 3 = fixed)
+ok   [0] queue replay reproduces
+ok   [3] queue replay against fix
+ok   [4] replay against wrong family
+ok   [4] missing file
+ok   same seed -> identical report and case file
+ok   [4] truncated case file
+ok   [4] unsupported schema version
+ok   [4] non-numeric choice
+ok   [4] edited op line is reported as drift
+ok   [4] unknown test identifier
+ok   [4] garbage file
+ok   [4] case missing its final operation is drift
+ok   [4] case with an extra operation is drift
+ok   [5] different failure exits 5, not 3
+ok   [1] 41-operation queue failure, --steps 80
+ok   long case records steps 80 and all 41 operations
+ok   [0] long case replay reproduces
+ok   [3] long case against fixed queue passes
+ok   [0] 0.1.0 case file reproduces
+ok   [3] 0.1.0 case file against fix passes
+ok   printed permissions regression compiles and passes on the fixed target
+ok   printed permissions regression fails (assertion, not compile error) on the buggy target
+ok   printed queue regression compiles and passes on the fixed target
+ok   printed queue regression fails (assertion, not compile error) on the buggy target
+ok   trace JSON parses
+ok   [0] scripted demo
+all CLI checks passed
+EXIT 0
