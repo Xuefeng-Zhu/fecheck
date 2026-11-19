@@ -13,6 +13,9 @@ backends. A small native Fe CLI adds `run`, `replay` and `demo` commands.
 Built for the [Fe Builders Challenge 2026](https://fe-lang.org/contest/) with
 **Fe 26.6.0**.
 
+Watch the 66-second recording: [docs/media/fecheck-demo.mp4](docs/media/fecheck-demo.mp4)
+(rendered from real CLI output by `scripts/record-demo.sh`).
+
 ```
 $ ./out/fecheck run permissions --seed 12345
 FeCheck - Property Testing for Fe
