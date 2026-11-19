@@ -1,0 +1,193 @@
+// Running tests: generate cases, detect a failure, shrink it.
+//
+// A FeCheck test is any callable `F: Fn(mut Source) -> Verdict`. It draws
+// its input from the source and reports a verdict. Property tests
+// (`property.fe`) and state-machine tests (`machine.fe`) are both built on
+// this one shape, so the engine below (generation, shrinking, replay) is
+// shared by every kind of test.
+//
+// The engine forwards the test's effects (`uses F::E`): a test that needs
+// an effect, such as `Evm` to call a deployed contract, can be run here, and
+// a test that declares none is checked by the compiler to be pure.
+
+use core::MemVec
+use super::rng::case_seed
+use super::source::{Source, DEFAULT_MAX_CHOICES, copy_choices}
+use super::verdict::Verdict
+use super::shrink::{shrink, ShrinkStats}
+
+/// Settings for one `check` run.
+pub struct Config {
+    /// The run's seed. Case `i` is generated from `case_seed(seed, i)`.
+    pub seed: u64,
+    /// How many passing cases to run before declaring success.
+    pub cases: u64,
+    /// The most discarded cases tolerated before giving up.
+    pub max_discards: u64,
+    /// The most choices one case may draw.
+    pub max_choices: usize,
+    /// The most candidates the shrinker may evaluate (0 disables shrinking).
+    pub shrink_budget: u64,
+}
+
+impl Config {
+    pub fn new(seed: u64, cases: u64) -> Self {
+        Config {
+            seed,
+            cases,
+            max_discards: cases * 10 + 100,
+            max_choices: DEFAULT_MAX_CHOICES,
+            shrink_budget: 5000,
+        }
+    }
+
+    /// Why the configuration is unusable, or 0 when it is valid.
+    pub fn problem(self) -> u64 {
+        if self.cases == 0 {
+            return CONFIG_NO_CASES
+        }
+        if self.max_choices == 0 {
+            return CONFIG_NO_CHOICES
+        }
+        if self.cases > MAX_CASES {
+            return CONFIG_TOO_MANY_CASES
+        }
+        0
+    }
+}
+
+pub const MAX_CASES: u64 = 100000000
+pub const CONFIG_NO_CASES: u64 = 1
+pub const CONFIG_NO_CHOICES: u64 = 2
+pub const CONFIG_TOO_MANY_CASES: u64 = 3
+
+/// How a `check` run ended.
+pub enum Status {
+    /// Every generated case passed.
+    Passed,
+    /// A case failed; the report holds the original and shrunk choices.
+    Failed,
+    /// The configuration was rejected before any case ran.
+    InvalidConfig { problem: u64 },
+    /// Too many cases were discarded to reach the requested count.
+    GaveUp,
+}
+
+/// The result of a `check` run.
+pub struct Report {
+    pub status: Status,
+    pub seed: u64,
+    /// Cases evaluated, including the failing one and discarded ones.
+    pub cases_run: u64,
+    pub passed: u64,
+    pub discarded: u64,
+    /// Index of the failing case, and the seed it was generated from.
+    pub failing_case: u64,
+    pub failing_case_seed: u64,
+    /// The failure as first found, and after shrinking.
+    pub original_verdict: Verdict,
+    pub shrunk_verdict: Verdict,
+    pub original: MemVec<u64>,
+    pub shrunk: MemVec<u64>,
+    pub shrink: ShrinkStats,
+}
+
+impl Report {
+    pub fn passed(self) -> bool {
+        match self.status {
+            Status::Passed => true,
+            _ => false,
+        }
+    }
+
+    pub fn failed(self) -> bool {
+        match self.status {
+            Status::Failed => true,
+            _ => false,
+        }
+    }
+
+    /// The process exit status a CI job should use for this report:
+    /// 0 passed, 1 property failed, 2 invalid configuration, 3 gave up.
+    pub fn exit_code(self) -> i32 {
+        match self.status {
+            Status::Passed => 0,
+            Status::Failed => 1,
+            Status::InvalidConfig { problem } => 2,
+            Status::GaveUp => 3,
+        }
+    }
+}
+
+/// Runs `test` once on fresh choices from `seed`.
+/// Returns the verdict and the choices the case drew.
+pub fn run_random<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_choices: usize) -> (Verdict, MemVec<u64>) uses F::E {
+    var src = Source::random(seed, max_choices)
+    let v = test(mut src)
+    let verdict = if src.overran() { Verdict::Discard } else { v }
+    (verdict, src.into_choices())
+}
+
+/// Runs `test` once on recorded `choices`.
+/// Returns the verdict and the choices actually read (clamped, untruncated
+/// reads past the end recorded as 0).
+pub fn run_choices<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u64>, _ max_choices: usize) -> (Verdict, MemVec<u64>) uses F::E {
+    var src = Source::replay(copy_choices(choices), max_choices)
+    let v = test(mut src)
+    let verdict = if src.overran() { Verdict::Discard } else { v }
+    (verdict, src.into_choices())
+}
+
+/// Checks `test` against `config.cases` generated cases, and shrinks the
+/// first failure found.
+pub fn check<F: Fn(mut Source) -> Verdict>(_ test: F, _ config: Config) -> Report uses F::E {
+    var report = Report {
+        status: Status::Passed,
+        seed: config.seed,
+        cases_run: 0,
+        passed: 0,
+        discarded: 0,
+        failing_case: 0,
+        failing_case_seed: 0,
+        original_verdict: Verdict::Pass,
+        shrunk_verdict: Verdict::Pass,
+        original: MemVec::new(),
+        shrunk: MemVec::new(),
+        shrink: ShrinkStats { attempts: 0, accepted: 0, budget_exhausted: false },
+    }
+    let problem = config.problem()
+    if problem != 0 {
+        report.status = Status::InvalidConfig { problem }
+        return report
+    }
+
+    var index: u64 = 0
+    while report.passed < config.cases {
+        if report.discarded > config.max_discards {
+            report.status = Status::GaveUp
+            return report
+        }
+        let seed = case_seed(config.seed, index)
+        let (verdict, choices) = run_random(test, seed, config.max_choices)
+        report.cases_run += 1
+        if verdict.is_failure() {
+            let result = shrink(test, choices, verdict, config.max_choices, config.shrink_budget)
+            report.status = Status::Failed
+            report.failing_case = index
+            report.failing_case_seed = seed
+            report.original_verdict = verdict
+            report.shrunk_verdict = result.verdict
+            report.original = result.original
+            report.shrunk = result.choices
+            report.shrink = result.stats
+            return report
+        }
+        if verdict.is_discard() {
+            report.discarded += 1
+        } else {
+            report.passed += 1
+        }
+        index += 1
+    }
+    report
+}

@@ -1,0 +1,23 @@
+use ingot::rng::{SplitMix64, mix64}
+use ingot::source::Source
+use ingot::verdict::{Verdict, ensure}
+use ingot::gen::{Gen, uint_in}
+use ingot::runner::{Config, check}
+
+#[test]
+fn splitmix_reference_vector() {
+    var r = SplitMix64::new(0)
+    assert!(r.next_u64() == 0xE220A8397B1DCDAF)
+}
+
+#[test]
+fn finds_and_shrinks_threshold() {
+    let report = check(|src: mut Source| {
+        let x = uint_in(0, 1000000).generate(mut src)
+        ensure(x < 1000, 1)
+    }, Config::new(seed: 7, cases: 200))
+    assert!(report.failed())
+    assert!(report.shrunk.len() == 1)
+    assert!(report.shrunk[0] == 1000)
+}
+

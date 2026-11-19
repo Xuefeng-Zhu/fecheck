@@ -1,0 +1,181 @@
+// The choice sequence.
+//
+// Every generator in FeCheck builds its value from a stream of bounded
+// integer choices drawn from a `Source`. The source records each choice it
+// hands out, so a test case is fully described by that list of integers.
+//
+// This is the representation popularised by Hypothesis ("internal
+// reduction", MacIver and Donaldson, ECOOP 2020). It gives FeCheck three
+// things at once:
+//
+// * Replay: feeding the recorded choices back regenerates exactly the same
+//   value or command sequence, independent of the PRNG.
+// * Generic shrinking: the shrinker only ever edits the list of integers
+//   (deleting runs, lowering values), so no generator needs its own shrinker
+//   and every shrunk case is still a value the generator could produce.
+// * Portable artifacts: a failure is saved as plain integers.
+//
+// A replayed choice larger than the bound of the draw that reads it is
+// clamped to that bound, and a draw past the end of the recorded choices
+// returns 0, the simplest choice. Both keep edited sequences valid.
+
+use core::MemVec
+use super::rng::SplitMix64
+
+/// Hard upper bound on the choices one test case may draw.
+pub const DEFAULT_MAX_CHOICES: usize = 4096
+
+pub struct Source {
+    rng: SplitMix64,
+    replaying: bool,
+    prefix: MemVec<u64>,
+    pos: usize,
+    recorded: MemVec<u64>,
+    max_choices: usize,
+    overrun: bool,
+}
+
+impl Source {
+    /// A source that draws fresh choices from a seeded PRNG.
+    pub fn random(_ seed: u64, _ max_choices: usize) -> Self {
+        Source {
+            rng: SplitMix64::new(seed),
+            replaying: false,
+            prefix: MemVec::new(),
+            pos: 0,
+            recorded: MemVec::new(),
+            max_choices,
+            overrun: false,
+        }
+    }
+
+    /// A source that replays `choices`, then returns 0 for every further draw.
+    pub fn replay(_ choices: own MemVec<u64>, _ max_choices: usize) -> Self {
+        Source {
+            rng: SplitMix64::new(0),
+            replaying: true,
+            prefix: choices,
+            pos: 0,
+            recorded: MemVec::new(),
+            max_choices,
+            overrun: false,
+        }
+    }
+
+    /// A choice in `0..=max`. Smaller choices are considered simpler.
+    pub fn draw(mut self, _ max: u64) -> u64 {
+        if self.recorded.len() >= self.max_choices {
+            // Out of budget: stop recording and hand out the simplest value.
+            // The runner classifies an overrun case as invalid.
+            self.overrun = true
+            return 0
+        }
+        var value: u64 = 0
+        if self.replaying {
+            if self.pos < self.prefix.len() {
+                value = self.prefix[self.pos]
+                self.pos += 1
+                if value > max {
+                    value = max
+                }
+            }
+        } else {
+            value = self.rng.up_to(max)
+        }
+        self.recorded.push(value)
+        value
+    }
+
+    /// `true` with probability `numerator / denominator` in random mode.
+    /// Shrinks toward `false`.
+    pub fn draw_weighted(mut self, _ numerator: u64, _ denominator: u64) -> bool {
+        if numerator == 0 || denominator == 0 {
+            return false
+        }
+        if numerator >= denominator {
+            return self.draw(1) == 1
+        }
+        if self.replaying {
+            return self.draw(1) == 1
+        }
+        if self.recorded.len() >= self.max_choices {
+            self.overrun = true
+            return false
+        }
+        let hit = self.rng.up_to(denominator - 1) < numerator
+        let value: u64 = if hit { 1 } else { 0 }
+        self.recorded.push(value)
+        hit
+    }
+
+    /// A fair coin. Shrinks toward `false`.
+    pub fn draw_bool(mut self) -> bool {
+        self.draw(1) == 1
+    }
+
+    /// Whether the case drew more choices than its budget allows.
+    pub fn overran(self) -> bool {
+        self.overrun
+    }
+
+    /// How many choices have been drawn so far.
+    pub fn len(self) -> usize {
+        self.recorded.len()
+    }
+
+    /// Whether this source is replaying recorded choices.
+    pub fn is_replaying(self) -> bool {
+        self.replaying
+    }
+
+    /// The choices drawn so far, normalised: clamped and without unread tail.
+    pub fn choices(self) -> ref MemVec<u64> {
+        ref self.recorded
+    }
+
+    /// Gives up the source and returns the choices it recorded.
+    pub fn into_choices(own self) -> MemVec<u64> {
+        self.recorded
+    }
+}
+
+/// A copy of a list of choices.
+pub fn copy_choices(_ choices: MemVec<u64>) -> MemVec<u64> {
+    var out: MemVec<u64> = MemVec::with_capacity(choices.len())
+    for c in choices {
+        out.push(c)
+    }
+    out
+}
+
+/// Whether two choice lists are equal.
+pub fn same_choices(_ a: MemVec<u64>, _ b: MemVec<u64>) -> bool {
+    if a.len() != b.len() {
+        return false
+    }
+    var i: usize = 0
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false
+        }
+        i += 1
+    }
+    true
+}
+
+/// Shortlex order: `a` is simpler than `b` when it is shorter, or equally
+/// long and lexicographically smaller. This is the order the shrinker
+/// minimises, which guarantees that shrinking terminates.
+pub fn simpler(_ a: MemVec<u64>, _ b: MemVec<u64>) -> bool {
+    if a.len() != b.len() {
+        return a.len() < b.len()
+    }
+    var i: usize = 0
+    while i < a.len() {
+        if a[i] != b[i] {
+            return a[i] < b[i]
+        }
+        i += 1
+    }
+    false
+}

@@ -1,0 +1,105 @@
+// The outcome of running one test case.
+//
+// Fe has no exceptions and a native panic cannot be caught, so a property
+// reports its outcome as a value. `Fail` is a violated property; `Error` is
+// a case that could not be evaluated (for example a checked operation that
+// would have overflowed); `Discard` rejects an input that does not meet the
+// property's assumptions. Each failure carries a property-defined `code`,
+// which the shrinker uses as the failure's identity: a smaller candidate is
+// only accepted when it fails in the same way.
+
+pub enum Verdict {
+    Pass,
+    Discard,
+    Fail { code: u64 },
+    Error { code: u64 },
+}
+
+impl Copy for Verdict {}
+
+impl Verdict {
+    pub fn is_pass(self) -> bool {
+        match self {
+            Verdict::Pass => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_discard(self) -> bool {
+        match self {
+            Verdict::Discard => true,
+            _ => false,
+        }
+    }
+
+    /// Whether this verdict is a failure or an error.
+    pub fn is_failure(self) -> bool {
+        match self {
+            Verdict::Fail { code } => true,
+            Verdict::Error { code } => true,
+            _ => false,
+        }
+    }
+
+    /// The failure code, or 0 for a passing or discarded case.
+    pub fn code(self) -> u64 {
+        match self {
+            Verdict::Fail { code } => code,
+            Verdict::Error { code } => code,
+            _ => 0,
+        }
+    }
+
+    /// 0 pass, 1 discard, 2 fail, 3 error.
+    pub fn kind(self) -> u64 {
+        match self {
+            Verdict::Pass => 0,
+            Verdict::Discard => 1,
+            Verdict::Fail { code } => 2,
+            Verdict::Error { code } => 3,
+        }
+    }
+
+    /// Whether `self` and `other` are the same kind of failure with the
+    /// same code. This is the shrinker's acceptance test.
+    pub fn same_failure(self, _ other: Verdict) -> bool {
+        self.is_failure() && self.kind() == other.kind() && self.code() == other.code()
+    }
+}
+
+/// `Pass` when `condition` holds, otherwise `Fail { code }`.
+pub fn ensure(_ condition: bool, _ code: u64) -> Verdict {
+    if condition { Verdict::Pass } else { Verdict::Fail { code } }
+}
+
+/// `Pass` when `condition` holds, otherwise `Discard`.
+pub fn assume(_ condition: bool) -> Verdict {
+    if condition { Verdict::Pass } else { Verdict::Discard }
+}
+
+/// Builds a verdict from its `kind()` and `code()`. Unknown kinds map to
+/// `Error`, so a corrupted artifact can never read as a pass.
+pub fn verdict_from_parts(_ kind: u64, _ code: u64) -> Verdict {
+    if kind == 0 {
+        Verdict::Pass
+    } else if kind == 1 {
+        Verdict::Discard
+    } else if kind == 2 {
+        Verdict::Fail { code }
+    } else {
+        Verdict::Error { code }
+    }
+}
+
+/// The name of a verdict kind, as used in reports and artifacts.
+pub fn kind_name(_ kind: u64) -> String<7> {
+    if kind == 0 {
+        "pass"
+    } else if kind == 1 {
+        "discard"
+    } else if kind == 2 {
+        "fail"
+    } else {
+        "error"
+    }
+}

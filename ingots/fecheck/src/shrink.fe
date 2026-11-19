@@ -1,0 +1,231 @@
+// Counterexample shrinking on the choice sequence.
+//
+// The shrinker searches for a simpler list of choices that still makes the
+// test fail *in the same way* (same verdict kind and code). Every candidate
+// is run from scratch: the test builds a fresh input, model and system from
+// the candidate choices, so no state leaks between attempts.
+//
+// Passes, repeated until a full round makes no progress or the evaluation
+// budget runs out:
+//
+// 1. Delete runs of 8, 4, 2 and 1 consecutive choices. For lists and command
+//    sequences this removes whole elements or commands.
+// 2. Lower each choice: try 0, then binary-search the smallest value that
+//    still fails. For numbers this shrinks magnitudes; for commands it
+//    switches to simpler command kinds and smaller arguments.
+// 3. Lower adjacent pairs together (`a-1, b-1`), which escapes some local
+//    minima where two choices must change at once.
+//
+// A candidate is only accepted when the choices it actually read are
+// strictly smaller in shortlex order, so every accepted step makes progress
+// and the search terminates even with an unlimited budget. The result is a
+// *locally minimal* counterexample: no single pass step improves it. It is
+// not guaranteed to be the globally smallest failing input.
+
+use core::MemVec
+use super::source::{Source, copy_choices, simpler}
+use super::verdict::Verdict
+
+impl Copy for ShrinkStats {}
+
+pub struct ShrinkStats {
+    /// Candidates evaluated.
+    pub attempts: u64,
+    /// Candidates accepted as the new smallest failure.
+    pub accepted: u64,
+    /// Whether shrinking stopped because the budget ran out.
+    pub budget_exhausted: bool,
+}
+
+pub struct ShrinkResult {
+    pub original: MemVec<u64>,
+    pub choices: MemVec<u64>,
+    pub verdict: Verdict,
+    pub stats: ShrinkStats,
+}
+
+/// The working state of one shrink: the best failure so far and the budget.
+struct Shrinker {
+    best: MemVec<u64>,
+    target: Verdict,
+    verdict: Verdict,
+    max_choices: usize,
+    budget: u64,
+    stats: ShrinkStats,
+}
+
+impl Shrinker {
+    fn out_of_budget(self) -> bool {
+        self.stats.attempts >= self.budget
+    }
+}
+
+/// Runs one candidate and adopts it when it reproduces the target failure
+/// with simpler choices. Returns whether it was adopted.
+fn attempt<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker, _ candidate: own MemVec<u64>) -> bool uses F::E {
+    if s.out_of_budget() {
+        s.stats.budget_exhausted = true
+        return false
+    }
+    // A candidate no simpler than the current best can never be adopted.
+    if !simpler(candidate, s.best) {
+        return false
+    }
+    s.stats.attempts += 1
+    var src = Source::replay(candidate, s.max_choices)
+    let v = test(mut src)
+    if src.overran() {
+        return false
+    }
+    if !v.same_failure(s.target) {
+        return false
+    }
+    let used = src.into_choices()
+    if !simpler(used, s.best) {
+        return false
+    }
+    s.best = used
+    s.verdict = v
+    s.stats.accepted += 1
+    true
+}
+
+/// `choices` without the `len` entries starting at `start`.
+fn without_run(_ choices: MemVec<u64>, _ start: usize, _ len: usize) -> MemVec<u64> {
+    var out: MemVec<u64> = MemVec::with_capacity(choices.len())
+    var i: usize = 0
+    while i < choices.len() {
+        if i < start || i >= start + len {
+            out.push(choices[i])
+        }
+        i += 1
+    }
+    out
+}
+
+/// `choices` with entry `index` replaced by `value`.
+fn with_value(_ choices: MemVec<u64>, _ index: usize, _ value: u64) -> MemVec<u64> {
+    var out = copy_choices(choices)
+    out[index] = value
+    out
+}
+
+/// Pass 1: delete runs of consecutive choices.
+fn delete_runs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+    var improved = false
+    var size: usize = 8
+    while size >= 1 {
+        var start: usize = 0
+        while start + size <= s.best.len() {
+            if s.out_of_budget() {
+                return improved
+            }
+            let candidate = without_run(s.best, start, size)
+            if attempt(test, mut s, candidate) {
+                // Retry the same position: the next run has shifted into it.
+                improved = true
+            } else {
+                start += 1
+            }
+        }
+        size = size / 2
+    }
+    improved
+}
+
+/// Pass 2: lower each choice as far as it will go.
+fn lower_values<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+    var improved = false
+    var index: usize = 0
+    while index < s.best.len() {
+        if s.out_of_budget() {
+            return improved
+        }
+        let current = s.best[index]
+        if current != 0 {
+            let zeroed = with_value(s.best, index, 0)
+            if attempt(test, mut s, zeroed) {
+                improved = true
+            } else {
+                // Invariant: `hi` fails (it is the current value), `lo` does
+                // not. Binary-search the boundary between them.
+                var lo: u64 = 0
+                var hi: u64 = current
+                while lo + 1 < hi && !s.out_of_budget() {
+                    // The best list may have changed length after an
+                    // accepted candidate; stop if `index` fell off its end.
+                    if index >= s.best.len() {
+                        break
+                    }
+                    let mid = lo + (hi - lo) / 2
+                    let candidate = with_value(s.best, index, mid)
+                    if attempt(test, mut s, candidate) {
+                        hi = mid
+                        improved = true
+                    } else {
+                        lo = mid
+                    }
+                }
+            }
+        }
+        index += 1
+    }
+    improved
+}
+
+/// Pass 3: lower adjacent pairs of choices together.
+fn lower_pairs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+    var improved = false
+    var index: usize = 0
+    while index + 1 < s.best.len() {
+        if s.out_of_budget() {
+            return improved
+        }
+        let a = s.best[index]
+        let b = s.best[index + 1]
+        if a != 0 && b != 0 {
+            var candidate = copy_choices(s.best)
+            candidate[index] = a - 1
+            candidate[index + 1] = b - 1
+            if attempt(test, mut s, candidate) {
+                improved = true
+            }
+        }
+        index += 1
+    }
+    improved
+}
+
+/// Shrinks the failing `choices`, whose verdict was `target`.
+pub fn shrink<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u64>, _ target: Verdict, _ max_choices: usize, _ budget: u64) -> ShrinkResult uses F::E {
+    var s = Shrinker {
+        best: copy_choices(choices),
+        target,
+        verdict: target,
+        max_choices,
+        budget,
+        stats: ShrinkStats { attempts: 0, accepted: 0, budget_exhausted: false },
+    }
+    var progress = true
+    while progress && !s.out_of_budget() {
+        progress = false
+        if delete_runs(test, mut s) {
+            progress = true
+        }
+        if lower_values(test, mut s) {
+            progress = true
+        }
+        if lower_pairs(test, mut s) {
+            progress = true
+        }
+    }
+    if s.out_of_budget() {
+        s.stats.budget_exhausted = true
+    }
+    ShrinkResult {
+        original: copy_choices(choices),
+        choices: s.best,
+        verdict: s.verdict,
+        stats: s.stats,
+    }
+}

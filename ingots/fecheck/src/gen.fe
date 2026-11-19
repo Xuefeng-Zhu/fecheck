@@ -1,0 +1,166 @@
+// Generators.
+//
+// A generator turns choices from a `Source` into a value. Because shrinking
+// works on the choices, a generator only has to map *smaller choices to
+// simpler values*; it never needs a shrinker of its own.
+
+use core::MemVec
+use super::source::Source
+
+/// A generator of `Out` values.
+pub trait Gen {
+    type Out
+    fn generate(self, _ src: mut Source) -> Self::Out
+}
+
+/// Unsigned integers in `lo..=hi`, shrinking toward `lo`.
+pub struct UintRange {
+    pub lo: u64,
+    pub hi: u64,
+}
+
+impl Gen for UintRange {
+    type Out = u64
+    fn generate(self, _ src: mut Source) -> u64 {
+        if self.hi <= self.lo {
+            return self.lo
+        }
+        self.lo + src.draw(self.hi - self.lo)
+    }
+}
+
+/// `UintRange { lo, hi }`.
+pub fn uint_in(_ lo: u64, _ hi: u64) -> UintRange {
+    UintRange { lo, hi }
+}
+
+/// Signed integers in `lo..=hi`, shrinking toward 0 (or the bound nearest
+/// to 0 when the range excludes it).
+///
+/// The choice is zig-zag encoded around the shrink target: choice 0 is the
+/// target, 1 is one step above, 2 one step below, and so on, so lowering a
+/// choice always moves the value closer to the target.
+pub struct IntRange {
+    pub lo: i64,
+    pub hi: i64,
+}
+
+impl Gen for IntRange {
+    type Out = i64
+    fn generate(self, _ src: mut Source) -> i64 {
+        if self.hi <= self.lo {
+            return self.lo
+        }
+        // Work in i128 so that no intermediate overflows at the i64 extremes.
+        let lo: i128 = self.lo as i128
+        let hi: i128 = self.hi as i128
+        let target: i128 = if lo > 0 { lo } else if hi < 0 { hi } else { 0 }
+        let above: i128 = hi - target
+        let below: i128 = target - lo
+        let both: i128 = if above < below { above } else { below }
+        // above + below <= 2^64 - 1, so the span always fits in a u64.
+        let span: u64 = (above + below).downcast_saturate()
+        let c: i128 = src.draw(span) as i128
+        var value: i128 = target
+        if c == 0 {
+            value = target
+        } else if c <= 2 * both {
+            // Interleave: 1 -> +1, 2 -> -1, 3 -> +2, 4 -> -2, ...
+            let step: i128 = (c + 1) / 2
+            value = if c % 2 == 1 { target + step } else { target - step }
+        } else if above > below {
+            value = target + c - both
+        } else {
+            value = target - (c - both)
+        }
+        value.downcast_saturate()
+    }
+}
+
+/// `IntRange { lo, hi }`.
+pub fn int_in(_ lo: i64, _ hi: i64) -> IntRange {
+    IntRange { lo, hi }
+}
+
+/// Fair booleans, shrinking toward `false`.
+pub struct Bools {}
+
+impl Gen for Bools {
+    type Out = bool
+    fn generate(self, _ src: mut Source) -> bool {
+        src.draw_bool()
+    }
+}
+
+pub fn booleans() -> Bools {
+    Bools {}
+}
+
+/// An index into a finite set of `n` alternatives, shrinking toward 0.
+/// Order the alternatives from simplest to most complex.
+pub struct OneOf {
+    pub n: u64,
+}
+
+impl Gen for OneOf {
+    type Out = u64
+    fn generate(self, _ src: mut Source) -> u64 {
+        if self.n <= 1 {
+            return 0
+        }
+        src.draw(self.n - 1)
+    }
+}
+
+pub fn one_of(_ n: u64) -> OneOf {
+    OneOf { n }
+}
+
+/// Lists of at most `max_len` elements, shrinking toward shorter lists of
+/// simpler elements.
+///
+/// Each element is preceded by a "more" flag (Hypothesis' list encoding),
+/// so deleting the choices of one element removes exactly that element.
+pub struct VecOf<G> {
+    pub elem: G,
+    pub max_len: usize,
+    /// In random mode, continue with probability `(mean_len) / (mean_len + 1)`.
+    pub mean_len: u64,
+}
+
+impl<G: Gen> Gen for VecOf<G> {
+    type Out = MemVec<G::Out>
+    fn generate(self, _ src: mut Source) -> MemVec<G::Out> {
+        var out: MemVec<G::Out> = MemVec::new()
+        while out.len() < self.max_len {
+            if !src.draw_weighted(self.mean_len, self.mean_len + 1) {
+                break
+            }
+            out.push(self.elem.generate(mut src))
+        }
+        out
+    }
+}
+
+pub fn vec_of<G: Gen>(_ elem: own G, max_len: usize) -> VecOf<G> {
+    VecOf { elem, max_len, mean_len: 8 }
+}
+
+/// Pairs of independently generated values.
+pub struct Pair<A, B> {
+    pub first: A,
+    pub second: B,
+}
+
+impl<A: Gen, B: Gen> Gen for Pair<A, B> {
+    type Out = (A::Out, B::Out)
+    fn generate(self, _ src: mut Source) -> (A::Out, B::Out) {
+        let a = self.first.generate(mut src)
+        let b = self.second.generate(mut src)
+        (a, b)
+    }
+}
+
+pub fn pair<A: Gen, B: Gen>(_ first: own A, _ second: own B) -> Pair<A, B> {
+    Pair { first, second }
+}

@@ -1,0 +1,73 @@
+// Deterministic pseudorandom numbers.
+//
+// FeCheck uses SplitMix64 (Steele, Lea and Flood, "Fast Splittable
+// Pseudorandom Number Generators", OOPSLA 2014; public-domain reference
+// implementation by Sebastiano Vigna). It is tiny, has a full 2^64 period,
+// passes BigCrush, and is easy to audit. It is NOT cryptographically secure,
+// which a test-case generator does not need.
+//
+// The generator is a plain value: there is no global state, no clock and no
+// host entropy. This module declares no effects, so the compiler itself
+// guarantees that a sequence depends only on its seed.
+
+/// The SplitMix64 increment, the odd constant floor(2^64 / golden ratio).
+pub const GOLDEN_GAMMA: u64 = 0x9E3779B97F4A7C15
+
+/// A SplitMix64 generator.
+pub struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    /// A generator whose sequence is fully determined by `seed`.
+    pub fn new(_ seed: u64) -> Self {
+        SplitMix64 { state: seed }
+    }
+
+    /// The next 64 uniformly distributed bits.
+    #[arithmetic(unchecked)]
+    pub fn next_u64(mut self) -> u64 {
+        self.state = self.state + GOLDEN_GAMMA
+        mix64(self.state)
+    }
+
+    /// A uniformly distributed value in `0..=max`, without modulo bias.
+    ///
+    /// Uses rejection sampling: draws that fall in the incomplete final
+    /// bucket of size `2^64 mod (max + 1)` are discarded and redrawn. The
+    /// loop ends with probability 1 and, in the worst case (`max` just over
+    /// `2^63`), redraws fewer than half of the time.
+    #[arithmetic(unchecked)]
+    pub fn up_to(mut self, _ max: u64) -> u64 {
+        if max == 0xFFFFFFFFFFFFFFFF {
+            return self.next_u64()
+        }
+        let span: u64 = max + 1
+        // (2^64 - span) mod span == 2^64 mod span, computed without u128.
+        let reject_below: u64 = (0 - span) % span
+        loop {
+            let x = self.next_u64()
+            if x >= reject_below {
+                return x % span
+            }
+        }
+    }
+}
+
+/// The SplitMix64 output function (a variant of the MurmurHash3 finalizer).
+#[arithmetic(unchecked)]
+pub fn mix64(_ input: u64) -> u64 {
+    var z: u64 = input
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EB
+    z ^ (z >> 31)
+}
+
+/// The seed of case number `index` of a run started with `seed`.
+///
+/// Every case gets its own independent seed, so a single case can be
+/// regenerated without replaying the cases before it.
+#[arithmetic(unchecked)]
+pub fn case_seed(_ seed: u64, _ index: u64) -> u64 {
+    mix64(seed + mix64(index + GOLDEN_GAMMA))
+}
