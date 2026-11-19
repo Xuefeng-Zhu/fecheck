@@ -70,9 +70,7 @@ impl Display for Obs {
 
 impl<Q: Copy> Copy for QueueMachine<Q> {}
 
-pub struct QueueMachine<Q> {
-    pub make: Q,
-}
+pub struct QueueMachine<Q> { pub make: Q }
 
 pub fn against_masked() -> QueueMachine<MaskedRing> {
     QueueMachine { make: MaskedRing::new() }
@@ -100,11 +98,7 @@ impl<Q: BoundedQueue + Copy> StateMachine for QueueMachine<Q> {
         let kind = src.draw(2)
         if kind == 0 {
             Cmd::Push { value: src.draw(99) }
-        } else if kind == 1 {
-            Cmd::Pop
-        } else {
-            Cmd::Len
-        }
+        } else if kind == 1 { Cmd::Pop } else { Cmd::Len }
     }
 
     fn precondition(self, _ model: MemVec<u64>, _ cmd: Cmd) -> bool {
@@ -120,7 +114,7 @@ impl<Q: BoundedQueue + Copy> StateMachine for QueueMachine<Q> {
                     model.push(value)
                     Obs::Pushed
                 }
-            }
+            },
             Cmd::Pop => {
                 if model.len() == 0 {
                     Obs::Empty
@@ -135,14 +129,18 @@ impl<Q: BoundedQueue + Copy> StateMachine for QueueMachine<Q> {
                     let _ = model.pop()
                     Obs::Value { value: front }
                 }
-            }
+            },
             Cmd::Len => Obs::Length { n: len64(model.len()) },
         }
     }
 
     fn run_sut(self, _ sut: mut Q, _ cmd: Cmd) -> Obs {
         match cmd {
-            Cmd::Push { value } => if sut.push(value) { Obs::Pushed } else { Obs::Full },
+            Cmd::Push { value } => if sut.push(value) {
+                Obs::Pushed
+            } else {
+                Obs::Full
+            },
             Cmd::Pop => match sut.pop() {
                 Option::Some(v) => Obs::Value { value: v },
                 Option::None => Obs::Empty,
@@ -160,9 +158,15 @@ impl<Q: BoundedQueue + Copy> StateMachine for QueueMachine<Q> {
 
     fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
         if code == LENGTH_MISMATCH {
-            write!(mut out, "length_matches_model: the queue's length differs from the model's")
+            write!(
+                mut out,
+                "length_matches_model: the queue's length differs from the model's",
+            )
         } else if code == POSTCONDITION_MISMATCH {
-            write!(mut out, "fifo_order/respects_capacity: the queue's result differs from the model's")
+            write!(
+                mut out,
+                "fifo_order/respects_capacity: the queue's result differs from the model's",
+            )
         } else {
             write!(mut out, "unknown failure code ", code)
         }

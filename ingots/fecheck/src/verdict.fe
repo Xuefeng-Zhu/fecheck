@@ -69,12 +69,20 @@ impl Verdict {
 
 /// `Pass` when `condition` holds, otherwise `Fail { code }`.
 pub fn ensure(_ condition: bool, _ code: u64) -> Verdict {
-    if condition { Verdict::Pass } else { Verdict::Fail { code } }
+    if condition {
+        Verdict::Pass
+    } else {
+        Verdict::Fail { code }
+    }
 }
 
 /// `Pass` when `condition` holds, otherwise `Discard`.
 pub fn assume(_ condition: bool) -> Verdict {
-    if condition { Verdict::Pass } else { Verdict::Discard }
+    if condition {
+        Verdict::Pass
+    } else {
+        Verdict::Discard
+    }
 }
 
 /// Builds a verdict from its `kind()` and `code()`. Unknown kinds map to
@@ -97,9 +105,5 @@ pub fn kind_name(_ kind: u64) -> String<7> {
         "pass"
     } else if kind == 1 {
         "discard"
-    } else if kind == 2 {
-        "fail"
-    } else {
-        "error"
-    }
+    } else if kind == 2 { "fail" } else { "error" }
 }

@@ -133,7 +133,13 @@ pub fn run_traced<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Ste
     trace
 }
 
-fn execute<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps, _ trace: mut Trace, _ record: bool) -> Verdict {
+fn execute<M: StateMachine>(
+    _ machine: M,
+    _ src: mut Source,
+    _ steps: Steps,
+    _ trace: mut Trace,
+    _ record: bool,
+) -> Verdict {
     var model = machine.new_model()
     var sut = machine.new_sut()
     var index: u64 = 0
@@ -146,14 +152,18 @@ fn execute<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps, _ t
         if !machine.precondition(model, cmd) {
             trace.skipped += 1
             if record {
-                trace.steps.push(Step {
-                    index,
-                    command: format!(cmd),
-                    skipped: true,
-                    expected: MemBuffer::new(0),
-                    actual: MemBuffer::new(0),
-                    verdict: Verdict::Pass,
-                })
+                trace
+                    .steps
+                    .push(
+                        Step {
+                            index,
+                            command: format!(cmd),
+                            skipped: true,
+                            expected: MemBuffer::new(0),
+                            actual: MemBuffer::new(0),
+                            verdict: Verdict::Pass,
+                        },
+                    )
             }
             index += 1
             continue
@@ -168,14 +178,18 @@ fn execute<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps, _ t
             step_verdict = Verdict::Fail { code: POSTCONDITION_MISMATCH }
         }
         if record {
-            trace.steps.push(Step {
-                index,
-                command: format!(cmd),
-                skipped: false,
-                expected: format!(expected),
-                actual: format!(actual),
-                verdict: step_verdict,
-            })
+            trace
+                .steps
+                .push(
+                    Step {
+                        index,
+                        command: format!(cmd),
+                        skipped: false,
+                        expected: format!(expected),
+                        actual: format!(actual),
+                        verdict: step_verdict,
+                    },
+                )
         }
         if !step_verdict.is_pass() {
             verdict = step_verdict

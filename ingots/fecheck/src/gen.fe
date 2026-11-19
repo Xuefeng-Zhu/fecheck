@@ -14,10 +14,7 @@ pub trait Gen {
 }
 
 /// Unsigned integers in `lo..=hi`, shrinking toward `lo`.
-pub struct UintRange {
-    pub lo: u64,
-    pub hi: u64,
-}
+pub struct UintRange { pub lo: u64, pub hi: u64 }
 
 impl Gen for UintRange {
     type Out = u64
@@ -40,10 +37,7 @@ pub fn uint_in(_ lo: u64, _ hi: u64) -> UintRange {
 /// The choice is zig-zag encoded around the shrink target: choice 0 is the
 /// target, 1 is one step above, 2 one step below, and so on, so lowering a
 /// choice always moves the value closer to the target.
-pub struct IntRange {
-    pub lo: i64,
-    pub hi: i64,
-}
+pub struct IntRange { pub lo: i64, pub hi: i64 }
 
 impl Gen for IntRange {
     type Out = i64
@@ -67,7 +61,11 @@ impl Gen for IntRange {
         } else if c <= 2 * both {
             // Interleave: 1 -> +1, 2 -> -1, 3 -> +2, 4 -> -2, ...
             let step: i128 = (c + 1) / 2
-            value = if c % 2 == 1 { target + step } else { target - step }
+            value = if c % 2 == 1 {
+                target + step
+            } else {
+                target - step
+            }
         } else if above > below {
             value = target + c - both
         } else {
@@ -98,16 +96,12 @@ pub fn booleans() -> Bools {
 
 /// An index into a finite set of `n` alternatives, shrinking toward 0.
 /// Order the alternatives from simplest to most complex.
-pub struct OneOf {
-    pub n: u64,
-}
+pub struct OneOf { pub n: u64 }
 
 impl Gen for OneOf {
     type Out = u64
     fn generate(self, _ src: mut Source) -> u64 {
-        if self.n <= 1 {
-            return 0
-        }
+        if self.n <= 1 { return 0 }
         src.draw(self.n - 1)
     }
 }
@@ -147,10 +141,7 @@ pub fn vec_of<G: Gen>(_ elem: own G, max_len: usize) -> VecOf<G> {
 }
 
 /// Pairs of independently generated values.
-pub struct Pair<A, B> {
-    pub first: A,
-    pub second: B,
-}
+pub struct Pair<A, B> { pub first: A, pub second: B }
 
 impl<A: Gen, B: Gen> Gen for Pair<A, B> {
     type Out = (A::Out, B::Out)

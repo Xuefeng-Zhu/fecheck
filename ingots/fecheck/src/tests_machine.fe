@@ -1,12 +1,17 @@
-use core::MemBuffer
+// Tests for state machines, case files and replay.
+
+use core::{MemBuffer, MemVec}
+use core::abi::DynString
 use std::io::Display
-use ingot::source::Source
+use ingot::source::{Source, copy_choices, choices_from, same_choices}
 use ingot::verdict::Verdict
 use ingot::gen::{Gen, uint_in}
-use ingot::runner::{Config, check, run_choices}
-use ingot::machine::{StateMachine, steps, run_steps, run_traced}
+use ingot::runner::{Config, check}
+use ingot::machine::{StateMachine, steps, run_steps, run_traced, NO_STEP, POSTCONDITION_MISMATCH}
+use ingot::artifact::{Case, ParseError, encode, decode, parse_u64}
+use ingot::replay::{ReplayOutcome, replay_machine, replay_property, machine_case}
 
-// A counter that is wrong once it reaches 3 (an off-by-one saturating add).
+// A counter whose `Add` loses one unit when n > 50.
 enum CounterCmd {
     Inc,
     Add { pub n: u64 },
@@ -21,16 +26,35 @@ impl Display for CounterCmd {
     }
 }
 
-struct BuggyCounter {}
+struct Counter {
+    buggy: bool,
+    // When set, the precondition rejects every command.
+    reject_all: bool,
+}
+impl Copy for Counter {}
 
-impl StateMachine for BuggyCounter {
+fn buggy() -> Counter {
+    Counter { buggy: true, reject_all: false }
+}
+fn correct() -> Counter {
+    Counter { buggy: false, reject_all: false }
+}
+
+/// The SUT records how many commands it has seen, to check fresh starts.
+struct CounterSut { value: u64, applied: u64 }
+
+impl StateMachine for Counter {
     type Cmd = CounterCmd
     type Obs = u64
     type Model = u64
-    type Sut = u64
+    type Sut = CounterSut
 
-    fn new_model(self) -> u64 { 0 }
-    fn new_sut(self) -> u64 { 0 }
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> CounterSut {
+        CounterSut { value: 0, applied: 0 }
+    }
     fn gen_cmd(self, _ src: mut Source, _ model: u64) -> CounterCmd {
         if src.draw_bool() {
             CounterCmd::Add { n: uint_in(0, 100).generate(mut src) }
@@ -38,33 +62,330 @@ impl StateMachine for BuggyCounter {
             CounterCmd::Inc
         }
     }
-    fn precondition(self, _ model: u64, _ cmd: CounterCmd) -> bool { model < 1000000 }
+    fn precondition(self, _ model: u64, _ cmd: CounterCmd) -> bool {
+        !self.reject_all
+    }
     fn run_model(self, _ model: mut u64, _ cmd: CounterCmd) -> u64 {
         match cmd {
-            CounterCmd::Inc => { model += 1 }
-            CounterCmd::Add { n } => { model += n }
+            CounterCmd::Inc => {
+                model += 1
+            },
+            CounterCmd::Add { n } => {
+                model += n
+            },
         }
         model
     }
-    fn run_sut(self, _ sut: mut u64, _ cmd: CounterCmd) -> u64 {
+    fn run_sut(self, _ sut: mut CounterSut, _ cmd: CounterCmd) -> u64 {
+        sut.applied += 1
         match cmd {
-            CounterCmd::Inc => { sut += 1 }
-            CounterCmd::Add { n } => { if n > 50 { sut += n - 1 } else { sut += n } }
+            CounterCmd::Inc => {
+                sut.value += 1
+            },
+            CounterCmd::Add { n } => {
+                if self.buggy && n > 50 {
+                    sut.value += n - 1
+                } else {
+                    sut.value += n
+                }
+            },
         }
-        sut
+        sut.value
     }
-    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict { Verdict::Pass }
-    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) { write!(mut out, "counter diverged") }
+    fn invariant(self, _ model: u64, _ sut: CounterSut) -> Verdict {
+        // Never more than one SUT application per model step: catches a SUT
+        // that was not reset between runs.
+        if sut.applied > 1000 {
+            Verdict::Fail { code: 77 }
+        } else {
+            Verdict::Pass
+        }
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "counter diverged")
+    }
 }
+
+fn found_case(_ machine: Counter) -> Case {
+    let report = check(
+        |src: mut Source| run_steps(buggy(), mut src, steps(30, 8)),
+        Config::new(seed: 1, cases: 200),
+    )
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(buggy(), mut src, steps(30, 8))
+    machine_case(
+        test: format!("counter"),
+        target: format!("buggy"),
+        compiler: format!("fe 26.6.0"),
+        seed: 1,
+        case_index: report.failing_case,
+        cases: 200,
+        original_length: 9,
+        report.shrunk,
+        trace,
+    )
+}
+
+fn parse(_ text: MemBuffer) -> Case {
+    match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => panic(),
+    }
+}
+
+fn parse_fails(_ text: DynString) -> bool {
+    let buf = format!(text)
+    match decode(buf.span()) {
+        Result::Ok(_) => false,
+        Result::Err(_) => true,
+    }
+}
+
+// ---------------------------------------------------------------- machines
 
 #[test]
 fn machine_finds_and_shrinks() {
-    let report = check(|src: mut Source| run_steps(BuggyCounter {}, mut src, steps(30, 8)), Config::new(seed: 1, cases: 100))
+    let report = check(
+        |src: mut Source| run_steps(buggy(), mut src, steps(30, 8)),
+        Config::new(seed: 1, cases: 100),
+    )
     assert!(report.failed())
-    // Shrunk to: more=1, Add flag=1, n=51 (choice 51), then end.
-    var src = Source::replay(report.shrunk, 4096)
-    let trace = run_traced(BuggyCounter {}, mut src, steps(30, 8))
+    assert!(report.shrunk_verdict.code() == POSTCONDITION_MISMATCH)
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(buggy(), mut src, steps(30, 8))
     assert!(trace.len() == 1)
     assert!(trace.failed_step == 0)
     assert!(trace.steps[0].command == "Add(51)")
+    assert!(trace.steps[0].expected == "51")
+    assert!(trace.steps[0].actual == "50")
+}
+
+#[test]
+fn commands_apply_in_order() {
+    // more, Inc, more, Add(10), more, Inc, stop
+    var src = Source::replay(choices_from([1, 0, 1, 1, 10, 1, 0, 0]), 64)
+    let trace = run_traced(correct(), mut src, steps(30, 8))
+    assert!(trace.len() == 3)
+    assert!(trace.steps[0].command == "Inc")
+    assert!(trace.steps[1].command == "Add(10)")
+    assert!(trace.steps[2].command == "Inc")
+    assert!(trace.steps[0].actual == "1")
+    assert!(trace.steps[1].actual == "11")
+    assert!(trace.steps[2].actual == "12")
+    assert!(trace.verdict.is_pass())
+    assert!(trace.failed_step == NO_STEP)
+}
+
+#[test]
+fn every_run_starts_fresh() {
+    // Thousands of commands across cases, but each run starts from new_sut:
+    // the `applied > 1000` invariant can only trip if state leaked.
+    let report = check(
+        |src: mut Source| run_steps(correct(), mut src, steps(50, 30)),
+        Config::new(seed: 3, cases: 300),
+    )
+    assert!(report.passed())
+}
+
+#[test]
+fn max_steps_is_respected() {
+    var src = Source::random(5, 4096)
+    let trace = run_traced(correct(), mut src, steps(7, 1000))
+    assert!(trace.len() <= 7)
+}
+
+#[test]
+fn rejected_commands_are_skipped_consistently() {
+    let machine = Counter { buggy: true, reject_all: true }
+    let report = check(
+        |src: mut Source| run_steps(machine, mut src, steps(30, 8)),
+        Config::new(seed: 1, cases: 200),
+    )
+    assert!(report.passed())
+    var src = Source::replay(choices_from([1, 1, 99, 1, 0, 0]), 64)
+    let trace = run_traced(machine, mut src, steps(30, 8))
+    assert!(trace.len() == 2)
+    assert!(trace.skipped == 2)
+    assert!(trace.executed == 0)
+    assert!(trace.steps[0].skipped)
+}
+
+// ---------------------------------------------------------------- case files
+
+#[test]
+fn case_round_trips() {
+    let case = found_case(buggy())
+    let text = encode(case)
+    let back = parse(text)
+    assert!(back.test == "counter")
+    assert!(back.target == "buggy")
+    assert!(back.compiler == "fe 26.6.0")
+    assert!(back.seed == 1)
+    assert!(back.original_length == 9)
+    assert!(back.verdict.same_failure(case.verdict))
+    assert!(
+        back.has_failed_step && back.failed_step == case.failed_step,
+    )
+    assert!(same_choices(back.choices, case.choices))
+    assert!(back.ops.len() == case.ops.len())
+    assert!(back.ops[0] == case.ops[0])
+    assert!(back.violation == "counter diverged")
+    // Encoding is stable.
+    assert!(encode(back) == text)
+}
+
+#[test]
+fn malformed_cases_are_rejected() {
+    assert!(parse_fails(""))
+    assert!(parse_fails("hello world\n"))
+    // Unsupported schema version.
+    assert!(parse_fails("fecheck-case 2\n"))
+    // Truncated: header only.
+    assert!(parse_fails("fecheck-case 1\ntest t\n"))
+    // Out-of-order keys.
+    assert!(parse_fails("fecheck-case 1\ntarget x\ntest t\n"))
+    // Not a number / overflow.
+    assert!(
+        parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed abc\n",
+        ),
+    )
+    assert!(
+        parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 18446744073709551616\n",
+        ),
+    )
+    // Bad verdict.
+    assert!(
+        parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict boom 1\n",
+        ),
+    )
+    // Negative or junk choices.
+    assert!(
+        parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices 1 -2\nviolation v\nend\n",
+        ),
+    )
+    // Data after `end`.
+    assert!(
+        parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices 1\nviolation v\nend\nextra\n",
+        ),
+    )
+    // A minimal valid file, for contrast.
+    assert!(
+        !parse_fails(
+            "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
+        ),
+    )
+}
+
+#[test]
+fn schema_error_reports_version() {
+    let text = format!("fecheck-case 7\n")
+    match decode(text.span()) {
+        Result::Err(ParseError::UnsupportedSchema { found }) => assert!(found == 7),
+        _ => assert!(false),
+    }
+}
+
+#[test]
+fn too_many_choices_are_rejected() {
+    var text = format!(
+        "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices",
+    )
+    var i: u64 = 0
+    while i < 4100 {
+        write!(mut text, " 1")
+        i += 1
+    }
+    write!(mut text, "\nviolation v\nend\n")
+    match decode(text.span()) {
+        Result::Err(ParseError::TooManyChoices) => {},
+        _ => assert!(false),
+    }
+}
+
+#[test]
+fn parse_u64_edges() {
+    let max = format!("18446744073709551615")
+    assert!(parse_u64(max.span()) == Option::Some(0xFFFFFFFFFFFFFFFF))
+    let over = format!("18446744073709551616")
+    assert!(parse_u64(over.span()) == Option::None)
+    let empty = format!("")
+    assert!(parse_u64(empty.span()) == Option::None)
+    let plus = format!("+1")
+    assert!(parse_u64(plus.span()) == Option::None)
+}
+
+// ---------------------------------------------------------------- replay
+
+#[test]
+fn replay_reproduces_saved_failure() {
+    let case = parse(encode(found_case(buggy())))
+    let (outcome, trace) = replay_machine(buggy(), steps(30, 8), case)
+    assert!(outcome.is_reproduced())
+    assert!(trace.failed_step == case.failed_step)
+}
+
+#[test]
+fn replay_against_fix_no_longer_fails() {
+    let case = parse(encode(found_case(buggy())))
+    let (outcome, trace) = replay_machine(correct(), steps(30, 8), case)
+    assert!(outcome.kind() == 1)
+    // The same operations ran; they just passed.
+    assert!(trace.steps.len() == case.ops.len())
+}
+
+#[test]
+fn replay_detects_drift() {
+    var case = parse(encode(found_case(buggy())))
+    case.ops[0] = format!("Inc")
+    let (outcome, _) = replay_machine(buggy(), steps(30, 8), case)
+    assert!(outcome.kind() == 4)
+}
+
+#[test]
+fn replay_detects_a_different_failure() {
+    var case = parse(encode(found_case(buggy())))
+    // Pretend the recorded failure was an invariant violation instead.
+    case.verdict = Verdict::Fail { code: 77 }
+    let (outcome, _) = replay_machine(buggy(), steps(30, 8), case)
+    assert!(outcome.kind() == 2)
+    assert!(!outcome.is_reproduced())
+}
+
+#[test]
+fn replay_never_reads_an_error_as_success() {
+    var case = parse(encode(found_case(buggy())))
+    // A property that errors on these choices must not count as reproduced
+    // a recorded *failure*, nor as fixed.
+    let outcome = replay_property(
+        |src: mut Source| {
+            let _ = src.draw(10)
+            Verdict::Error { code: POSTCONDITION_MISMATCH }
+        },
+        case,
+    )
+    assert!(outcome.kind() == 2)
+}
+
+#[test]
+fn replay_property_round_trip() {
+    let test = |src: mut Source| {
+        let x = uint_in(0, 1000000).generate(mut src)
+        if x >= 1234 {
+            Verdict::Fail { code: 5 }
+        } else {
+            Verdict::Pass
+        }
+    }
+    let report = check(test, Config::new(seed: 3, cases: 100))
+    var case = parse(encode(found_case(buggy())))
+    case.choices = copy_choices(report.shrunk)
+    case.verdict = report.shrunk_verdict
+    case.has_failed_step = false
+    let outcome = replay_property(test, case)
+    assert!(outcome.is_reproduced())
 }

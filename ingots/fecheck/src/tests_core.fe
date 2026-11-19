@@ -1,23 +1,429 @@
-use ingot::rng::{SplitMix64, mix64}
-use ingot::source::Source
-use ingot::verdict::{Verdict, ensure}
-use ingot::gen::{Gen, uint_in}
-use ingot::runner::{Config, check}
+// Tests for the PRNG, sources, generators, runner and shrinker.
+
+use core::MemVec
+use ingot::rng::{SplitMix64, case_seed}
+use ingot::source::{Source, copy_choices, same_choices, choices_from, simpler}
+use ingot::verdict::{Verdict, ensure, assume}
+use ingot::gen::{Gen, uint_in, int_in, vec_of, booleans, one_of, pair}
+use ingot::runner::{Config, Status, check, run_random, run_choices}
+
+// ---------------------------------------------------------------- rng
 
 #[test]
 fn splitmix_reference_vector() {
+    // First outputs of the SplitMix64 reference implementation for seed 0.
     var r = SplitMix64::new(0)
     assert!(r.next_u64() == 0xE220A8397B1DCDAF)
+    assert!(r.next_u64() == 0x6E789E6AA1B965F4)
+    assert!(r.next_u64() == 0x06C45D188009454F)
 }
 
 #[test]
-fn finds_and_shrinks_threshold() {
-    let report = check(|src: mut Source| {
-        let x = uint_in(0, 1000000).generate(mut src)
-        ensure(x < 1000, 1)
-    }, Config::new(seed: 7, cases: 200))
+fn same_seed_same_sequence() {
+    var a = SplitMix64::new(987654321)
+    var b = SplitMix64::new(987654321)
+    var i: u64 = 0
+    while i < 200 {
+        assert!(a.next_u64() == b.next_u64())
+        i += 1
+    }
+}
+
+#[test]
+fn different_seeds_differ() {
+    var a = SplitMix64::new(1)
+    var b = SplitMix64::new(2)
+    var same: u64 = 0
+    var i: u64 = 0
+    while i < 64 {
+        if a.next_u64() == b.next_u64() {
+            same += 1
+        }
+        i += 1
+    }
+    assert!(same == 0)
+}
+
+#[test]
+fn up_to_respects_bounds_at_edges() {
+    var r = SplitMix64::new(42)
+    var i: u64 = 0
+    var saw_max = false
+    while i < 500 {
+        assert!(r.up_to(0) == 0)
+        let one = r.up_to(1)
+        assert!(one <= 1)
+        let six = r.up_to(6)
+        assert!(six <= 6)
+        if six == 6 { saw_max = true }
+        // Just over 2^63: the worst case for rejection sampling.
+        assert!(r.up_to(0x8000000000000001) <= 0x8000000000000001)
+        // The full range must not overflow `max + 1`.
+        let _ = r.up_to(0xFFFFFFFFFFFFFFFF)
+        i += 1
+    }
+    assert!(saw_max)
+}
+
+#[test]
+fn case_seeds_are_distinct() {
+    assert!(case_seed(7, 0) != case_seed(7, 1))
+    assert!(case_seed(7, 1) != case_seed(8, 1))
+    assert!(case_seed(7, 3) == case_seed(7, 3))
+}
+
+// ---------------------------------------------------------------- source
+
+#[test]
+fn replay_clamps_and_pads_with_zero() {
+    var src = Source::replay(choices_from([5, 100, 3]), 64)
+    assert!(src.draw(10) == 5)
+    // 100 is above the bound 7: clamped.
+    assert!(src.draw(7) == 7)
+    assert!(src.draw(9) == 3)
+    // Past the end: the simplest choice.
+    assert!(src.draw(9) == 0)
+    assert!(same_choices(src.choices(), choices_from([5, 7, 3, 0])))
+}
+
+#[test]
+fn draws_past_budget_overrun() {
+    var src = Source::random(1, 3)
+    let _ = src.draw(10)
+    let _ = src.draw(10)
+    let _ = src.draw(10)
+    assert!(!src.overran())
+    assert!(src.draw(10) == 0)
+    assert!(src.overran())
+    assert!(src.len() == 3)
+}
+
+#[test]
+fn random_then_replay_regenerates_value() {
+    var src = Source::random(31337, 4096)
+    let values = vec_of(uint_in(0, 1000000), max_len: 20).generate(mut src)
+    var again = Source::replay(src.into_choices(), 4096)
+    let replayed = vec_of(uint_in(0, 1000000), max_len: 20).generate(mut again)
+    assert!(same_choices(values, replayed))
+}
+
+#[test]
+fn shortlex_order() {
+    assert!(simpler(choices_from([9, 9]), choices_from([0, 0, 0])))
+    assert!(simpler(choices_from([1, 0]), choices_from([1, 1])))
+    assert!(!simpler(choices_from([1, 1]), choices_from([1, 1])))
+}
+
+// ---------------------------------------------------------------- generators
+
+#[test]
+fn uint_range_bounds() {
+    var src = Source::random(5, 100000)
+    var i: u64 = 0
+    while i < 1000 {
+        let x = uint_in(10, 20).generate(mut src)
+        assert!(x >= 10 && x <= 20)
+        i += 1
+    }
+    assert!(uint_in(7, 7).generate(mut src) == 7)
+    // A full-width range does not overflow.
+    let _ = uint_in(0, 0xFFFFFFFFFFFFFFFF).generate(mut src)
+}
+
+#[test]
+fn int_range_bounds_and_shrink_target() {
+    var src = Source::random(6, 100000)
+    var i: u64 = 0
+    while i < 1000 {
+        let x = int_in(-50, 30).generate(mut src)
+        assert!(x >= -50 && x <= 30)
+        let y = int_in(-9223372036854775808, 9223372036854775807).generate(mut src)
+        let _ = y
+        i += 1
+    }
+    // Choice 0 is the value closest to zero.
+    var zero = Source::replay(choices_from([0]), 8)
+    assert!(int_in(-50, 30).generate(mut zero) == 0)
+    var pos = Source::replay(choices_from([0]), 8)
+    assert!(int_in(5, 10).generate(mut pos) == 5)
+    var neg = Source::replay(choices_from([0]), 8)
+    assert!(int_in(-10, -3).generate(mut neg) == -3)
+    // Zig-zag: 1 -> +1, 2 -> -1.
+    var one = Source::replay(choices_from([1]), 8)
+    assert!(int_in(-50, 30).generate(mut one) == 1)
+    var two = Source::replay(choices_from([2]), 8)
+    assert!(int_in(-50, 30).generate(mut two) == -1)
+    // Past the shorter side: only the longer side remains.
+    var far = Source::replay(choices_from([80]), 8)
+    assert!(int_in(-50, 30).generate(mut far) == -50)
+    // Extremes.
+    var lo = Source::replay(choices_from([0xFFFFFFFFFFFFFFFF]), 8)
+    assert!(
+        int_in(-9223372036854775808, 9223372036854775807).generate(mut lo) == -9223372036854775808,
+    )
+}
+
+#[test]
+fn vec_respects_max_len() {
+    var src = Source::random(77, 100000)
+    var i: u64 = 0
+    while i < 200 {
+        let v = vec_of(booleans(), max_len: 5).generate(mut src)
+        assert!(v.len() <= 5)
+        i += 1
+    }
+}
+
+#[test]
+fn one_of_and_pair() {
+    var src = Source::random(8, 100000)
+    var i: u64 = 0
+    while i < 300 {
+        assert!(one_of(4).generate(mut src) < 4)
+        let (a, b) = pair(uint_in(0, 3), uint_in(10, 12)).generate(mut src)
+        assert!(a <= 3 && b >= 10 && b <= 12)
+        i += 1
+    }
+    assert!(one_of(1).generate(mut src) == 0)
+}
+
+// ---------------------------------------------------------------- runner
+
+#[test]
+fn always_true_passes_all_cases() {
+    let report = check(
+        |src: mut Source| {
+            let _ = uint_in(0, 100).generate(mut src)
+            Verdict::Pass
+        },
+        Config::new(seed: 1, cases: 250),
+    )
+    assert!(report.passed())
+    assert!(report.cases_run == 250)
+    assert!(report.passed == 250)
+    assert!(report.exit_code() == 0)
+}
+
+#[test]
+fn known_failure_fails() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 10).generate(mut src)
+            ensure(x != 10, 1)
+        },
+        Config::new(seed: 1, cases: 1000),
+    )
+    assert!(report.failed())
+    assert!(report.exit_code() == 1)
+    assert!(report.cases_run <= 1000)
+    assert!(report.cases_run == report.failing_case + 1)
+}
+
+#[test]
+fn errors_are_classified_separately() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 1000).generate(mut src)
+            // A checked operation that "would overflow" is an error, not a failure.
+            let wide: u128 = (x as u128) * 0xFFFFFFFFFFFFFFF
+            if wide > 0xFFFFFFFFFFFFFFFF {
+                Verdict::Error { code: 9 }
+            } else {
+                Verdict::Pass
+            }
+        },
+        Config::new(seed: 3, cases: 500),
+    )
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.kind() == 3)
+    assert!(report.shrunk_verdict.code() == 9)
+    // The smallest x with x * (2^60 - 1) > 2^64 - 1 is 17.
+    assert!(report.shrunk[0] == 17)
+}
+
+#[test]
+fn discarding_everything_gives_up() {
+    var config = Config::new(seed: 1, cases: 10)
+    config.max_discards = 20
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 10).generate(mut src)
+            assume(x > 100)
+        },
+        config,
+    )
+    match report.status {
+        Status::GaveUp => {},
+        _ => assert!(false),
+    }
+    assert!(report.exit_code() == 3)
+    assert!(report.discarded == 21)
+}
+
+#[test]
+fn invalid_config_is_rejected() {
+    let report = check(
+        |src: mut Source| Verdict::Pass,
+        Config::new(seed: 1, cases: 0),
+    )
+    assert!(report.exit_code() == 2)
+    assert!(report.cases_run == 0)
+}
+
+#[test]
+fn overrun_cases_are_discarded() {
+    var config = Config::new(seed: 1, cases: 5)
+    config.max_choices = 4
+    config.max_discards = 3
+    let report = check(
+        |src: mut Source| {
+            var i: u64 = 0
+            while i < 10 {
+                let _ = src.draw(5)
+                i += 1
+            }
+            Verdict::Fail { code: 1 }
+        },
+        config,
+    )
+    // Every case overruns, so none counts as a failure.
+    assert!(report.exit_code() == 3)
+}
+
+// ---------------------------------------------------------------- shrinking
+
+#[test]
+fn numeric_shrinks_to_boundary() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 1000000).generate(mut src)
+            ensure(x < 1000, 1)
+        },
+        Config::new(seed: 7, cases: 200),
+    )
     assert!(report.failed())
     assert!(report.shrunk.len() == 1)
     assert!(report.shrunk[0] == 1000)
+    assert!(report.shrink.accepted > 0)
+    assert!(report.shrink.attempts >= report.shrink.accepted)
 }
 
+#[test]
+fn signed_shrinks_toward_zero() {
+    let report = check(
+        |src: mut Source| {
+            let x = int_in(-1000000, 1000000).generate(mut src)
+            ensure(x > -500, 1)
+        },
+        Config::new(seed: 11, cases: 200),
+    )
+    assert!(report.failed())
+    var src = Source::replay(copy_choices(report.shrunk), 16)
+    assert!(int_in(-1000000, 1000000).generate(mut src) == -500)
+}
+
+#[test]
+fn sequence_drops_irrelevant_elements() {
+    // Fails when any element is at least 50.
+    let report = check(
+        |src: mut Source| {
+            let v = vec_of(uint_in(0, 100), max_len: 30).generate(mut src)
+            var ok = true
+            for x in v {
+                if x >= 50 { ok = false }
+            }
+            ensure(ok, 1)
+        },
+        Config::new(seed: 21, cases: 500),
+    )
+    assert!(report.failed())
+    // [more=1, 50, more=0]: a single element, exactly at the boundary.
+    assert!(same_choices(report.shrunk, choices_from([1, 50, 0])))
+    assert!(report.original.len() > report.shrunk.len())
+}
+
+#[test]
+fn shrinking_keeps_the_failure_identity() {
+    // Two different failures; the shrinker must not swap one for the other.
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 1000000).generate(mut src)
+            if x > 500000 {
+                return Verdict::Fail { code: 2 }
+            }
+            ensure(x <= 100, 1)
+        },
+        Config::new(seed: 4, cases: 100),
+    )
+    assert!(report.failed())
+    assert!(
+        report.shrunk_verdict.code() == report.original_verdict.code(),
+    )
+    if report.original_verdict.code() == 2 {
+        assert!(report.shrunk[0] == 500001)
+    } else {
+        assert!(report.shrunk[0] == 101)
+    }
+}
+
+#[test]
+fn shrunk_case_still_fails() {
+    let test = |src: mut Source| {
+        let (a, b) = pair(uint_in(0, 1000), uint_in(0, 1000)).generate(mut src)
+        ensure(a + b < 1500, 3)
+    }
+    let report = check(test, Config::new(seed: 9, cases: 500))
+    assert!(report.failed())
+    let (verdict, _) = run_choices(test, report.shrunk, 4096)
+    assert!(verdict.same_failure(report.shrunk_verdict))
+}
+
+#[test]
+fn shrinking_respects_budget() {
+    var config = Config::new(seed: 7, cases: 200)
+    config.shrink_budget = 5
+    let report = check(
+        |src: mut Source| {
+            let v = vec_of(uint_in(0, 1000000), max_len: 30).generate(mut src)
+            ensure(v.len() < 3, 1)
+        },
+        config,
+    )
+    assert!(report.failed())
+    assert!(report.shrink.attempts <= 5)
+    assert!(report.shrink.budget_exhausted)
+}
+
+#[test]
+fn shrinking_disabled_keeps_original() {
+    var config = Config::new(seed: 7, cases: 200)
+    config.shrink_budget = 0
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 1000000).generate(mut src)
+            ensure(x < 1000, 1)
+        },
+        config,
+    )
+    assert!(report.failed())
+    assert!(report.shrink.attempts == 0)
+    assert!(same_choices(report.original, report.shrunk))
+}
+
+#[test]
+fn shrinking_is_deterministic() {
+    let test = |src: mut Source| {
+        let v = vec_of(pair(uint_in(0, 500), uint_in(0, 500)), max_len: 20).generate(mut src)
+        var total: u64 = 0
+        for (a, b) in v {
+            total += a * b
+        }
+        ensure(total < 30000, 1)
+    }
+    let first = check(test, Config::new(seed: 2024, cases: 500))
+    let second = check(test, Config::new(seed: 2024, cases: 500))
+    assert!(first.failed())
+    assert!(same_choices(first.original, second.original))
+    assert!(same_choices(first.shrunk, second.shrunk))
+    assert!(first.shrink.attempts == second.shrink.attempts)
+}

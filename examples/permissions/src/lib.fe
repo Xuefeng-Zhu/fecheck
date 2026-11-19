@@ -1,4 +1,13 @@
 // Demo A: state-machine testing of an agent permission system.
 
 pub use system::{AGENTS, PermissionApi, CachedPermissions, FixedPermissions}
-pub use machine::{Cmd, Obs, Model, Sut, PermissionMachine, against_cached, against_fixed, REVOKED_AGENT_EXECUTED}
+pub use machine::{
+    Cmd,
+    Obs,
+    Model,
+    Sut,
+    PermissionMachine,
+    against_cached,
+    against_fixed,
+    REVOKED_AGENT_EXECUTED,
+}

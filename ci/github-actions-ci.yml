@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FE_VERSION: v26.6.0
+
+jobs:
+  test:
+    # Native Fe executables require an x86-64 Linux (or AArch64 macOS) host.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Fe
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/argotorg/fe/master/feup/feup.sh | bash -s -- --version "$FE_VERSION" --no-modify-path
+          echo "$HOME/.fe/bin" >> "$GITHUB_PATH"
+      - run: fe --version
+      - name: Format check
+        run: for d in ingots/fecheck examples/permissions examples/queue cli; do fe fmt --check "$d"; done
+      - name: Tests (EVM + native), CLI build and end-to-end checks
+        run: ./scripts/test.sh
+      - name: Demo
+        run: ./out/fecheck demo --dir ci-failures
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fecheck-demo-cases
+          path: ci-failures/

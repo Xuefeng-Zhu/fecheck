@@ -47,11 +47,21 @@ pub fn case_json(_ case: Case, _ trace: Trace) -> MemBuffer {
     write!(mut out, "  \"compilerVersion\": ")
     write_json_string(mut out, case.compiler.span())
     writeln!(mut out, ",")
-    writeln!(mut out, "  \"fecheckVersion\": \"", FECHECK_VERSION, "\",")
+    writeln!(
+        mut out,
+        "  \"fecheckVersion\": \"",
+        FECHECK_VERSION,
+        "\",",
+    )
     writeln!(mut out, "  \"seed\": \"", case.seed, "\",")
     writeln!(mut out, "  \"caseIndex\": ", case.case_index, ",")
     writeln!(mut out, "  \"cases\": ", case.cases, ",")
-    writeln!(mut out, "  \"originalLength\": ", case.original_length, ",")
+    writeln!(
+        mut out,
+        "  \"originalLength\": ",
+        case.original_length,
+        ",",
+    )
     writeln!(mut out, "  \"shrunkLength\": ", trace.len(), ",")
     write!(mut out, "  \"choices\": [")
     var first = true
@@ -69,17 +79,41 @@ pub fn case_json(_ case: Case, _ trace: Trace) -> MemBuffer {
         if i > 0 {
             write!(mut out, ",")
         }
-        write!(mut out, "\n    {\"index\": ", trace.steps[i].index, ", \"command\": ")
+        write!(
+            mut out,
+            "\n    {\"index\": ",
+            trace.steps[i].index,
+            ", \"command\": ",
+        )
         write_json_string(mut out, trace.steps[i].command.span())
-        write!(mut out, ", \"skipped\": ", trace.steps[i].skipped, ", \"expected\": ")
+        write!(
+            mut out,
+            ", \"skipped\": ",
+            trace.steps[i].skipped,
+            ", \"expected\": ",
+        )
         write_json_string(mut out, trace.steps[i].expected.span())
         write!(mut out, ", \"actual\": ")
         write_json_string(mut out, trace.steps[i].actual.span())
-        write!(mut out, ", \"verdict\": \"", kind_name(trace.steps[i].verdict.kind()), "\", \"code\": ", trace.steps[i].verdict.code(), "}")
+        write!(
+            mut out,
+            ", \"verdict\": \"",
+            kind_name(trace.steps[i].verdict.kind()),
+            "\", \"code\": ",
+            trace.steps[i].verdict.code(),
+            "}",
+        )
         i += 1
     }
     writeln!(mut out, "\n  ],")
-    write!(mut out, "  \"failure\": {\"verdict\": \"", kind_name(case.verdict.kind()), "\", \"code\": ", case.verdict.code(), ", \"operationIndex\": ")
+    write!(
+        mut out,
+        "  \"failure\": {\"verdict\": \"",
+        kind_name(case.verdict.kind()),
+        "\", \"code\": ",
+        case.verdict.code(),
+        ", \"operationIndex\": ",
+    )
     if trace.failed_step == NO_STEP {
         write!(mut out, "null")
     } else {

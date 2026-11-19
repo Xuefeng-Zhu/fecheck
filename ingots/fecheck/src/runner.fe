@@ -121,7 +121,12 @@ impl Report {
 
 /// Runs `test` once on fresh choices from `seed`.
 /// Returns the verdict and the choices the case drew.
-pub fn run_random<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_choices: usize) -> (Verdict, MemVec<u64>) uses F::E {
+pub fn run_random<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_choices: usize) -> (
+    Verdict,
+    MemVec<u64>,
+)
+uses F::E
+{
     var src = Source::random(seed, max_choices)
     let v = test(mut src)
     let verdict = if src.overran() { Verdict::Discard } else { v }
@@ -131,7 +136,13 @@ pub fn run_random<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_ch
 /// Runs `test` once on recorded `choices`.
 /// Returns the verdict and the choices actually read (clamped, untruncated
 /// reads past the end recorded as 0).
-pub fn run_choices<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u64>, _ max_choices: usize) -> (Verdict, MemVec<u64>) uses F::E {
+pub fn run_choices<F: Fn(mut Source) -> Verdict>(
+    _ test: F,
+    _ choices: MemVec<u64>,
+    _ max_choices: usize,
+) -> (Verdict, MemVec<u64>)
+uses F::E
+{
     var src = Source::replay(copy_choices(choices), max_choices)
     let v = test(mut src)
     let verdict = if src.overran() { Verdict::Discard } else { v }
@@ -140,7 +151,9 @@ pub fn run_choices<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u6
 
 /// Checks `test` against `config.cases` generated cases, and shrinks the
 /// first failure found.
-pub fn check<F: Fn(mut Source) -> Verdict>(_ test: F, _ config: Config) -> Report uses F::E {
+pub fn check<F: Fn(mut Source) -> Verdict>(_ test: F, _ config: Config) -> Report
+uses F::E
+{
     var report = Report {
         status: Status::Passed,
         seed: config.seed,
@@ -171,7 +184,13 @@ pub fn check<F: Fn(mut Source) -> Verdict>(_ test: F, _ config: Config) -> Repor
         let (verdict, choices) = run_random(test, seed, config.max_choices)
         report.cases_run += 1
         if verdict.is_failure() {
-            let result = shrink(test, choices, verdict, config.max_choices, config.shrink_budget)
+            let result = shrink(
+                test,
+                choices,
+                verdict,
+                config.max_choices,
+                config.shrink_budget,
+            )
             report.status = Status::Failed
             report.failing_case = index
             report.failing_case_seed = seed

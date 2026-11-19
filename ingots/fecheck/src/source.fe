@@ -75,9 +75,7 @@ impl Source {
             if self.pos < self.prefix.len() {
                 value = self.prefix[self.pos]
                 self.pos += 1
-                if value > max {
-                    value = max
-                }
+                if value > max { value = max }
             }
         } else {
             value = self.rng.up_to(max)

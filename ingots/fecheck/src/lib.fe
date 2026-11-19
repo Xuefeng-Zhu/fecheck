@@ -3,12 +3,44 @@
 // Find the failure. Shrink the story. Replay the proof.
 
 pub use rng::{SplitMix64, mix64, case_seed}
-pub use source::{Source, len64, choices_from, copy_choices, same_choices, simpler, DEFAULT_MAX_CHOICES}
+pub use source::{
+    Source,
+    len64,
+    choices_from,
+    copy_choices,
+    same_choices,
+    simpler,
+    DEFAULT_MAX_CHOICES,
+}
 pub use verdict::{Verdict, ensure, assume, verdict_from_parts, kind_name}
-pub use gen::{Gen, UintRange, IntRange, Bools, OneOf, VecOf, Pair, uint_in, int_in, booleans, one_of, vec_of, pair}
+pub use gen::{
+    Gen,
+    UintRange,
+    IntRange,
+    Bools,
+    OneOf,
+    VecOf,
+    Pair,
+    uint_in,
+    int_in,
+    booleans,
+    one_of,
+    vec_of,
+    pair,
+}
 pub use runner::{Config, Report, Status, check, run_random, run_choices}
 pub use shrink::{shrink, ShrinkResult, ShrinkStats}
-pub use machine::{StateMachine, Steps, Step, Trace, steps, run_steps, run_traced, POSTCONDITION_MISMATCH, NO_STEP}
+pub use machine::{
+    StateMachine,
+    Steps,
+    Step,
+    Trace,
+    steps,
+    run_steps,
+    run_traced,
+    POSTCONDITION_MISMATCH,
+    NO_STEP,
+}
 pub use artifact::{Case, ParseError, encode, decode, parse_u64, SCHEMA_VERSION, FECHECK_VERSION}
 pub use replay::{ReplayOutcome, replay_property, replay_machine, machine_case}
 pub use json::{case_json, write_json_string}

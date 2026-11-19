@@ -19,7 +19,10 @@ pub enum ReplayOutcome {
     /// The case now passes: the bug is fixed (or the test got weaker).
     NoLongerFails,
     /// The case still fails, but differently (other kind, code or step).
-    DifferentFailure { pub verdict: Verdict, pub step: u64 },
+    DifferentFailure {
+        pub verdict: Verdict,
+        pub step: u64,
+    },
     /// The case was discarded or overran its budget: the generator changed.
     Invalid,
     /// The regenerated commands differ from the recorded ones at `step`.
@@ -46,14 +49,19 @@ impl ReplayOutcome {
 }
 
 /// Replays a property-test case.
-pub fn replay_property<F: Fn(mut Source) -> Verdict>(_ test: F, _ case: Case) -> ReplayOutcome uses F::E {
+pub fn replay_property<F: Fn(mut Source) -> Verdict>(_ test: F, _ case: Case) -> ReplayOutcome
+uses F::E
+{
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let v = test(mut src)
     classify(v, src.overran(), NO_STEP, case)
 }
 
 /// Replays a state-machine case. Returns the outcome and the full trace.
-pub fn replay_machine<M: StateMachine>(_ machine: M, _ steps: Steps, _ case: Case) -> (ReplayOutcome, Trace) {
+pub fn replay_machine<M: StateMachine>(_ machine: M, _ steps: Steps, _ case: Case) -> (
+    ReplayOutcome,
+    Trace,
+) {
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let trace = run_traced(machine, mut src, steps)
     // Every recorded op must be regenerated, in order and verbatim.
@@ -78,7 +86,11 @@ fn classify(_ v: Verdict, _ overran: bool, _ step: u64, _ case: Case) -> ReplayO
     if v.is_pass() {
         return ReplayOutcome::NoLongerFails
     }
-    let expected_step = if case.has_failed_step { case.failed_step } else { NO_STEP }
+    let expected_step = if case.has_failed_step {
+        case.failed_step
+    } else {
+        NO_STEP
+    }
     if v.same_failure(case.verdict) && step == expected_step {
         return ReplayOutcome::Reproduced
     }

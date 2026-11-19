@@ -31,7 +31,12 @@ impl Copy for CachedPermissions {}
 
 impl CachedPermissions {
     pub fn new() -> Self {
-        CachedPermissions { granted: [false; 4], cache_valid: false, cache_agent: 0, cache_allowed: false }
+        CachedPermissions {
+            granted: [false; 4],
+            cache_valid: false,
+            cache_agent: 0,
+            cache_allowed: false,
+        }
     }
 }
 
@@ -70,7 +75,12 @@ impl Copy for FixedPermissions {}
 
 impl FixedPermissions {
     pub fn new() -> Self {
-        FixedPermissions { granted: [false; 4], cache_valid: false, cache_agent: 0, cache_allowed: false }
+        FixedPermissions {
+            granted: [false; 4],
+            cache_valid: false,
+            cache_agent: 0,
+            cache_allowed: false,
+        }
     }
 }
 

@@ -62,9 +62,7 @@ impl Display for Obs {
     }
 }
 
-pub struct Model {
-    pub granted: [bool; 4],
-}
+pub struct Model { pub granted: [bool; 4] }
 
 /// The system under test plus what it last decided, for the invariant.
 pub struct Sut<S> {
@@ -77,9 +75,7 @@ pub struct Sut<S> {
 /// Tests any `PermissionApi` implementation built by `make`.
 impl<S: Copy> Copy for PermissionMachine<S> {}
 
-pub struct PermissionMachine<S> {
-    pub make: S,
-}
+pub struct PermissionMachine<S> { pub make: S }
 
 pub fn against_cached() -> PermissionMachine<CachedPermissions> {
     PermissionMachine { make: CachedPermissions::new() }
@@ -130,14 +126,18 @@ impl<S: PermissionApi + Copy> StateMachine for PermissionMachine<S> {
             Cmd::Grant { agent } => {
                 model.granted[idx(agent)] = true
                 Obs::Done
-            }
+            },
             Cmd::Revoke { agent } => {
                 model.granted[idx(agent)] = false
                 Obs::Done
-            }
+            },
             Cmd::Execute { agent } => {
-                if model.granted[idx(agent)] { Obs::Allowed } else { Obs::Denied }
-            }
+                if model.granted[idx(agent)] {
+                    Obs::Allowed
+                } else {
+                    Obs::Denied
+                }
+            },
         }
     }
 
@@ -147,17 +147,17 @@ impl<S: PermissionApi + Copy> StateMachine for PermissionMachine<S> {
             Cmd::Grant { agent } => {
                 sut.system.grant(agent)
                 Obs::Done
-            }
+            },
             Cmd::Revoke { agent } => {
                 sut.system.revoke(agent)
                 Obs::Done
-            }
+            },
             Cmd::Execute { agent } => {
                 let allowed = sut.system.execute(agent)
                 sut.allowed_now = allowed
                 sut.allowed_agent = agent
                 if allowed { Obs::Allowed } else { Obs::Denied }
-            }
+            },
         }
     }
 
@@ -172,7 +172,10 @@ impl<S: PermissionApi + Copy> StateMachine for PermissionMachine<S> {
 
     fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
         if code == REVOKED_AGENT_EXECUTED {
-            write!(mut out, "revoked_agent_cannot_execute: an agent without a current grant was allowed to execute")
+            write!(
+                mut out,
+                "revoked_agent_cannot_execute: an agent without a current grant was allowed to execute",
+            )
         } else if code == POSTCONDITION_MISMATCH {
             write!(mut out, "the system's result differs from the model's")
         } else {

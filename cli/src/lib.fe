@@ -18,9 +18,31 @@ use std::env::Args
 use std::fs::Fs
 use std::io::Stdout
 use fecheck::{
-    Source, Config, Report, Status, StateMachine, Steps, Trace, Case, ParseError, ReplayOutcome,
-    check, steps, run_steps, run_traced, encode, decode, parse_u64, machine_case, replay_machine,
-    case_json, copy_choices, len64, kind_name, DEFAULT_MAX_CHOICES, NO_STEP,
+    Source,
+    Config,
+    Report,
+    Status,
+    StateMachine,
+    Steps,
+    Trace,
+    Case,
+    ParseError,
+    ReplayOutcome,
+    check,
+    steps,
+    run_steps,
+    run_traced,
+    encode,
+    decode,
+    parse_u64,
+    machine_case,
+    replay_machine,
+    case_json,
+    copy_choices,
+    len64,
+    kind_name,
+    DEFAULT_MAX_CHOICES,
+    NO_STEP,
 }
 use permissions::{against_cached, against_fixed}
 use queue::{against_masked, against_mod}
@@ -95,23 +117,37 @@ pub fn main() -> i32 uses (out: mut Stdout, args: Args, fs: mut Fs) {
 }
 
 fn usage() uses (out: mut Stdout) {
-    println!("FeCheck - property-based and state-machine testing for Fe")
+    println!(
+        "FeCheck - property-based and state-machine testing for Fe",
+    )
     println!()
     println!("usage:")
     println!("  fecheck list")
-    println!("  fecheck run <test> [--seed N] [--cases N] [--steps N] [--save FILE] [--json FILE] [--no-shrink]")
+    println!(
+        "  fecheck run <test> [--seed N] [--cases N] [--steps N] [--save FILE] [--json FILE] [--no-shrink]",
+    )
     println!("  fecheck replay <file> [--against TARGET] [--json FILE]")
     println!("  fecheck demo [--seed N] [--dir DIR]")
     println!()
-    println!("exit status: 0 ok, 1 property failed, 2 usage error, 3 replay did not reproduce, 4 bad case file")
+    println!(
+        "exit status: 0 ok, 1 property failed, 2 usage error, 3 replay did not reproduce, 4 bad case file",
+    )
 }
 
 fn list() uses (out: mut Stdout) {
     println!("Tests (name -> implementation under test):")
-    println!("  permissions        revoked_agent_cannot_execute  against the cached system (has a bug)")
-    println!("  permissions-fixed  revoked_agent_cannot_execute  against the fixed system")
-    println!("  queue              bounded_queue_matches_model   against MaskedRing (has a bug)")
-    println!("  queue-fixed        bounded_queue_matches_model   against ModRing")
+    println!(
+        "  permissions        revoked_agent_cannot_execute  against the cached system (has a bug)",
+    )
+    println!(
+        "  permissions-fixed  revoked_agent_cannot_execute  against the fixed system",
+    )
+    println!(
+        "  queue              bounded_queue_matches_model   against MaskedRing (has a bug)",
+    )
+    println!(
+        "  queue-fixed        bounded_queue_matches_model   against ModRing",
+    )
 }
 
 fn parse_options(_ first: usize) -> Options uses (out: mut Stdout, args: Args) {
@@ -150,12 +186,18 @@ fn parse_options(_ first: usize) -> Options uses (out: mut Stdout, args: Args) {
                     } else {
                         opts.max_steps = n
                     }
-                }
+                },
                 Option::None => {
-                    println!("fecheck: `", flag, "` needs a whole number, got `", value, "`")
+                    println!(
+                        "fecheck: `",
+                        flag,
+                        "` needs a whole number, got `",
+                        value,
+                        "`",
+                    )
                     opts.error = true
                     return opts
-                }
+                },
             }
         } else if flag == "--save" {
             opts.save = format!(value)
@@ -184,7 +226,9 @@ fn property_of(_ name: MemSpan) -> MemBuffer {
     }
 }
 
-fn run_named(_ name: MemSpan, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+fn run_named(_ name: MemSpan, _ opts: Options) -> i32
+uses (out: mut Stdout, fs: mut Fs)
+{
     let s = steps(opts.max_steps, 12)
     if name == "permissions" {
         return run_machine(against_cached(), s, format!(name), opts)
@@ -207,7 +251,14 @@ fn header() uses (out: mut Stdout) {
 }
 
 /// Runs a state-machine test, prints the report, and saves the case.
-fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own MemBuffer, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+fn run_machine<M: StateMachine + Copy>(
+    _ machine: M,
+    _ s: Steps,
+    _ target: own MemBuffer,
+    _ opts: Options,
+) -> i32
+uses (out: mut Stdout, fs: mut Fs)
+{
     var config = Config::new(seed: opts.seed, cases: opts.cases)
     if !opts.shrink {
         config.shrink_budget = 0
@@ -217,26 +268,46 @@ fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own M
     println!("Test:    ", property)
     println!("Target:  ", target)
     println!("Seed:    ", opts.seed)
-    println!("Cases:   ", opts.cases, " (up to ", opts.max_steps, " operations each)")
+    println!(
+        "Cases:   ",
+        opts.cases,
+        " (up to ",
+        opts.max_steps,
+        " operations each)",
+    )
 
     let report = check(|src: mut Source| run_steps(machine, mut src, s), config)
     match report.status {
         Status::Passed => {
             println!()
-            println!("Property passed: ", report.passed, " cases, ", report.discarded, " discarded.")
+            println!(
+                "Property passed: ",
+                report.passed,
+                " cases, ",
+                report.discarded,
+                " discarded.",
+            )
             return EXIT_OK
-        }
+        },
         Status::InvalidConfig { problem } => {
             println!()
-            println!("Invalid configuration (problem ", problem, "): --cases must be between 1 and 100000000.")
+            println!(
+                "Invalid configuration (problem ",
+                problem,
+                "): --cases must be between 1 and 100000000.",
+            )
             return EXIT_USAGE
-        }
+        },
         Status::GaveUp => {
             println!()
-            println!("Gave up: too many discarded cases (", report.discarded, ").")
+            println!(
+                "Gave up: too many discarded cases (",
+                report.discarded,
+                ").",
+            )
             return EXIT_FAILED
-        }
-        Status::Failed => {}
+        },
+        Status::Failed => {},
     }
 
     // Trace the original and shrunk failures.
@@ -246,11 +317,35 @@ fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own M
     let trace = run_traced(machine, mut shrunk_src, s)
 
     println!()
-    println!("Property failed on case ", report.failing_case + 1, " of ", opts.cases, ".")
-    println!("Original: ", original.len(), " operations (", report.original.len(), " choices)")
-    println!("Shrunk:   ", trace.len(), " operations (", report.shrunk.len(), " choices) after ", report.shrink.attempts, " candidates, ", report.shrink.accepted, " accepted")
+    println!(
+        "Property failed on case ",
+        report.failing_case + 1,
+        " of ",
+        opts.cases,
+        ".",
+    )
+    println!(
+        "Original: ",
+        original.len(),
+        " operations (",
+        report.original.len(),
+        " choices)",
+    )
+    println!(
+        "Shrunk:   ",
+        trace.len(),
+        " operations (",
+        report.shrunk.len(),
+        " choices) after ",
+        report.shrink.attempts,
+        " candidates, ",
+        report.shrink.accepted,
+        " accepted",
+    )
     if report.shrink.budget_exhausted {
-        println!("          (shrink budget exhausted; the case may shrink further)")
+        println!(
+            "          (shrink budget exhausted; the case may shrink further)",
+        )
     }
     print_trace("Counterexample:", trace)
 
@@ -265,7 +360,11 @@ fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own M
         report.shrunk,
         trace,
     )
-    let path = if opts.save.len() > 0 { format!(opts.save) } else { format!(opts.dir, "/", case.target, ".case") }
+    let path = if opts.save.len() > 0 {
+        format!(opts.save)
+    } else {
+        format!(opts.dir, "/", case.target, ".case")
+    }
     if opts.save.len() == 0 {
         let _ = fs.create_dir_all(format!(opts.dir))
     }
@@ -275,7 +374,7 @@ fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own M
             println!("  ", path)
             println!("Reproduce with:")
             println!("  fecheck replay ", path)
-        }
+        },
         Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
     }
     if opts.json.len() > 0 {
@@ -285,7 +384,9 @@ fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own M
     EXIT_FAILED
 }
 
-fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace) uses (out: mut Stdout, fs: mut Fs) {
+fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace)
+uses (out: mut Stdout, fs: mut Fs)
+{
     match fs.write(format!(path), case_json(case, trace).span()) {
         Result::Ok(_) => println!("Trace JSON: ", path),
         Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
@@ -296,11 +397,34 @@ fn print_trace(_ heading: String<16>, _ trace: Trace) uses (out: mut Stdout) {
     println!(heading)
     for ref step in trace.steps {
         if step.skipped {
-            println!("  ", step.index + 1, ". ", step.command, "   (skipped: precondition false)")
+            println!(
+                "  ",
+                step.index + 1,
+                ". ",
+                step.command,
+                "   (skipped: precondition false)",
+            )
         } else if step.index == trace.failed_step {
-            println!("  ", step.index + 1, ". ", step.command, "   -> expected ", step.expected, ", got ", step.actual, "   <-- violation")
+            println!(
+                "  ",
+                step.index + 1,
+                ". ",
+                step.command,
+                "   -> expected ",
+                step.expected,
+                ", got ",
+                step.actual,
+                "   <-- violation",
+            )
         } else {
-            println!("  ", step.index + 1, ". ", step.command, "   -> ", step.actual)
+            println!(
+                "  ",
+                step.index + 1,
+                ". ",
+                step.command,
+                "   -> ",
+                step.actual,
+            )
         }
     }
     if trace.failed_step != NO_STEP {
@@ -317,15 +441,17 @@ fn print_snippet(_ case: Case) uses (out: mut Stdout) {
     print!("      let choices = fecheck::choices_from([")
     var first = true
     for c in case.choices {
-        if !first {
-            print!(", ")
-        }
+        if !first { print!(", ") }
         print!(c)
         first = false
     }
     println!("])")
-    println!("      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)")
-    println!("      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())")
+    println!(
+        "      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)",
+    )
+    println!(
+        "      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())",
+    )
     println!("  }")
 }
 
@@ -335,35 +461,68 @@ fn describe_parse_error(_ e: ParseError) -> MemBuffer {
     text
 }
 
-fn replay_file(_ path: MemSpan, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+fn replay_file(_ path: MemSpan, _ opts: Options) -> i32
+uses (out: mut Stdout, fs: mut Fs)
+{
     header()
     let bytes = match fs.read(format!(path)) {
         Result::Ok(b) => b,
         Result::Err(e) => {
             println!("fecheck: cannot read ", path, ": ", e)
             return EXIT_BAD_CASE
-        }
+        },
     }
     let case = match decode(bytes.span()) {
         Result::Ok(c) => c,
         Result::Err(e) => {
-            println!("fecheck: ", path, " is not a valid case file: ", describe_parse_error(e))
+            println!(
+                "fecheck: ",
+                path,
+                " is not a valid case file: ",
+                describe_parse_error(e),
+            )
             return EXIT_BAD_CASE
-        }
+        },
     }
-    let target = if opts.against.len() > 0 { format!(opts.against) } else { format!(case.target) }
+    let target = if opts.against.len() > 0 {
+        format!(opts.against)
+    } else {
+        format!(case.target)
+    }
     println!("Case:    ", path)
     println!("Test:    ", case.test)
-    println!("Found against: ", case.target, " (", case.compiler, ", seed ", case.seed, ", case ", case.case_index + 1, ")")
+    println!(
+        "Found against: ",
+        case.target,
+        " (",
+        case.compiler,
+        ", seed ",
+        case.seed,
+        ", case ",
+        case.case_index + 1,
+        ")",
+    )
     println!("Replaying against: ", target)
     if case.compiler != COMPILER {
-        println!("note: recorded with ", case.compiler, ", replaying with ", COMPILER)
+        println!(
+            "note: recorded with ",
+            case.compiler,
+            ", replaying with ",
+            COMPILER,
+        )
     }
     // A case may only be replayed against a target of the same test family.
-    let family_ok = (case.test == "revoked_agent_cannot_execute" && target.span().starts_with("permissions"))
+    let family_ok = (case.test == "revoked_agent_cannot_execute"
+            && target.span().starts_with("permissions"))
         || (case.test == "bounded_queue_matches_model" && target.span().starts_with("queue"))
     if !family_ok {
-        println!("fecheck: target `", target, "` cannot run test `", case.test, "` (see `fecheck list`)")
+        println!(
+            "fecheck: target `",
+            target,
+            "` cannot run test `",
+            case.test,
+            "` (see `fecheck list`)",
+        )
         return EXIT_BAD_CASE
     }
     let s = steps(40, 12)
@@ -379,11 +538,22 @@ fn replay_file(_ path: MemSpan, _ opts: Options) -> i32 uses (out: mut Stdout, f
     if target == "queue-fixed" {
         return finish_replay(against_mod(), s, case, opts)
     }
-    println!("fecheck: unknown target `", target, "` (see `fecheck list`)")
+    println!(
+        "fecheck: unknown target `",
+        target,
+        "` (see `fecheck list`)",
+    )
     EXIT_BAD_CASE
 }
 
-fn finish_replay<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ case: Case, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+fn finish_replay<M: StateMachine + Copy>(
+    _ machine: M,
+    _ s: Steps,
+    _ case: Case,
+    _ opts: Options,
+) -> i32
+uses (out: mut Stdout, fs: mut Fs)
+{
     let (outcome, trace) = replay_machine(machine, s, case)
     println!()
     print_trace("Replayed:", trace)
@@ -393,83 +563,163 @@ fn finish_replay<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ case: Case,
     println!()
     match outcome {
         ReplayOutcome::Reproduced => {
-            println!("REPRODUCED: the recorded failure happened again at operation ", trace.failed_step + 1, ".")
+            println!(
+                "REPRODUCED: the recorded failure happened again at operation ",
+                trace.failed_step + 1,
+                ".",
+            )
             EXIT_OK
-        }
+        },
         ReplayOutcome::NoLongerFails => {
-            println!("NOT REPRODUCED: all ", trace.len(), " recorded operations now pass. The regression is fixed.")
+            println!(
+                "NOT REPRODUCED: all ",
+                trace.len(),
+                " recorded operations now pass. The regression is fixed.",
+            )
             EXIT_NOT_REPRODUCED
-        }
+        },
         ReplayOutcome::DifferentFailure { verdict, step } => {
-            println!("DIFFERENT FAILURE: ", kind_name(verdict.kind()), " code ", verdict.code(), " at operation ", step + 1, " (recorded: ", kind_name(case.verdict.kind()), " code ", case.verdict.code(), ").")
+            println!(
+                "DIFFERENT FAILURE: ",
+                kind_name(verdict.kind()),
+                " code ",
+                verdict.code(),
+                " at operation ",
+                step + 1,
+                " (recorded: ",
+                kind_name(case.verdict.kind()),
+                " code ",
+                case.verdict.code(),
+                ").",
+            )
             EXIT_NOT_REPRODUCED
-        }
+        },
         ReplayOutcome::Invalid => {
-            println!("INVALID: the recorded choices no longer form a valid test case.")
+            println!(
+                "INVALID: the recorded choices no longer form a valid test case.",
+            )
             EXIT_BAD_CASE
-        }
+        },
         ReplayOutcome::Drift { step } => {
-            println!("DRIFT: operation ", step + 1, " no longer matches the recorded `op` line; the generator or model changed.")
+            println!(
+                "DRIFT: operation ",
+                step + 1,
+                " no longer matches the recorded `op` line; the generator or model changed.",
+            )
             EXIT_BAD_CASE
-        }
+        },
     }
 }
 
 /// The scripted end-to-end demonstration.
 fn demo(_ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
-    println!("=== 1. Search: permissions system with a decision cache ===")
+    println!(
+        "=== 1. Search: permissions system with a decision cache ===",
+    )
     println!()
     var run_opts = Options {
-        seed: opts.seed, cases: 1000, max_steps: 40, shrink: true,
-        save: MemBuffer::new(0), json: format!(opts.dir, "/permissions.json"), against: MemBuffer::new(0),
-        dir: format!(opts.dir), error: false,
+        seed: opts.seed,
+        cases: 1000,
+        max_steps: 40,
+        shrink: true,
+        save: MemBuffer::new(0),
+        json: format!(opts.dir, "/permissions.json"),
+        against: MemBuffer::new(0),
+        dir: format!(opts.dir),
+        error: false,
     }
     let _ = fs.create_dir_all(format!(opts.dir))
-    let found = run_machine(against_cached(), steps(40, 12), format!("permissions"), run_opts)
+    let found = run_machine(
+        against_cached(),
+        steps(40, 12),
+        format!("permissions"),
+        run_opts,
+    )
     if found != EXIT_FAILED {
-        println!("demo: expected FeCheck to find the cache bug with seed ", opts.seed)
+        println!(
+            "demo: expected FeCheck to find the cache bug with seed ",
+            opts.seed,
+        )
         return EXIT_FAILED
     }
     let case_path = format!(opts.dir, "/permissions.case")
     println!()
-    println!("=== 2. Replay the saved case against the same (buggy) system ===")
+    println!(
+        "=== 2. Replay the saved case against the same (buggy) system ===",
+    )
     println!()
     let replay_opts = Options {
-        seed: 0, cases: 0, max_steps: 40, shrink: true,
-        save: MemBuffer::new(0), json: MemBuffer::new(0), against: MemBuffer::new(0),
-        dir: MemBuffer::new(0), error: false,
+        seed: 0,
+        cases: 0,
+        max_steps: 40,
+        shrink: true,
+        save: MemBuffer::new(0),
+        json: MemBuffer::new(0),
+        against: MemBuffer::new(0),
+        dir: MemBuffer::new(0),
+        error: false,
     }
     let again = replay_file(case_path.span(), replay_opts)
     println!()
     println!("=== 3. Replay the same case against the fixed system ===")
     println!()
     let fixed_opts = Options {
-        seed: 0, cases: 0, max_steps: 40, shrink: true,
-        save: MemBuffer::new(0), json: MemBuffer::new(0), against: format!("permissions-fixed"),
-        dir: MemBuffer::new(0), error: false,
+        seed: 0,
+        cases: 0,
+        max_steps: 40,
+        shrink: true,
+        save: MemBuffer::new(0),
+        json: MemBuffer::new(0),
+        against: format!("permissions-fixed"),
+        dir: MemBuffer::new(0),
+        error: false,
     }
     let fixed = replay_file(case_path.span(), fixed_opts)
     println!()
     println!("=== 4. Search: bounded ring-buffer queue ===")
     println!()
     run_opts.json = format!(opts.dir, "/queue.json")
-    let queue_found = run_machine(against_masked(), steps(40, 12), format!("queue"), run_opts)
+    let queue_found = run_machine(
+        against_masked(),
+        steps(40, 12),
+        format!("queue"),
+        run_opts,
+    )
     let queue_case = format!(opts.dir, "/queue.case")
     println!()
     println!("=== 5. Replay the queue case against the fixed queue ===")
     println!()
     let queue_fixed_opts = Options {
-        seed: 0, cases: 0, max_steps: 40, shrink: true,
-        save: MemBuffer::new(0), json: MemBuffer::new(0), against: format!("queue-fixed"),
-        dir: MemBuffer::new(0), error: false,
+        seed: 0,
+        cases: 0,
+        max_steps: 40,
+        shrink: true,
+        save: MemBuffer::new(0),
+        json: MemBuffer::new(0),
+        against: format!("queue-fixed"),
+        dir: MemBuffer::new(0),
+        error: false,
     }
     let queue_fixed = replay_file(queue_case.span(), queue_fixed_opts)
     println!()
     println!("=== Summary ===")
-    let ok = found == EXIT_FAILED && again == EXIT_OK && fixed == EXIT_NOT_REPRODUCED
-        && queue_found == EXIT_FAILED && queue_fixed == EXIT_NOT_REPRODUCED
-    println!("  permissions: bug found, shrunk, replayed, and gone in the fixed system: ", ok_text(found == EXIT_FAILED && again == EXIT_OK && fixed == EXIT_NOT_REPRODUCED))
-    println!("  queue:       bug found, shrunk, and gone in the fixed queue:            ", ok_text(queue_found == EXIT_FAILED && queue_fixed == EXIT_NOT_REPRODUCED))
+    let ok = found == EXIT_FAILED
+        && again == EXIT_OK
+        && fixed == EXIT_NOT_REPRODUCED
+        && queue_found == EXIT_FAILED
+        && queue_fixed == EXIT_NOT_REPRODUCED
+    println!(
+        "  permissions: bug found, shrunk, replayed, and gone in the fixed system: ",
+        ok_text(
+            found == EXIT_FAILED && again == EXIT_OK && fixed == EXIT_NOT_REPRODUCED,
+        ),
+    )
+    println!(
+        "  queue:       bug found, shrunk, and gone in the fixed queue:            ",
+        ok_text(
+            queue_found == EXIT_FAILED && queue_fixed == EXIT_NOT_REPRODUCED,
+        ),
+    )
     if ok { EXIT_OK } else { EXIT_FAILED }
 }
 

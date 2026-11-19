@@ -63,7 +63,13 @@ impl Shrinker {
 
 /// Runs one candidate and adopts it when it reproduces the target failure
 /// with simpler choices. Returns whether it was adopted.
-fn attempt<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker, _ candidate: own MemVec<u64>) -> bool uses F::E {
+fn attempt<F: Fn(mut Source) -> Verdict>(
+    _ test: F,
+    _ s: mut Shrinker,
+    _ candidate: own MemVec<u64>,
+) -> bool
+uses F::E
+{
     if s.out_of_budget() {
         s.stats.budget_exhausted = true
         return false
@@ -112,7 +118,9 @@ fn with_value(_ choices: MemVec<u64>, _ index: usize, _ value: u64) -> MemVec<u6
 }
 
 /// Pass 1: delete runs of consecutive choices.
-fn delete_runs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+fn delete_runs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool
+uses F::E
+{
     var improved = false
     var size: usize = 8
     while size >= 1 {
@@ -135,7 +143,9 @@ fn delete_runs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bo
 }
 
 /// Pass 2: lower each choice as far as it will go.
-fn lower_values<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+fn lower_values<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool
+uses F::E
+{
     var improved = false
     var index: usize = 0
     while index < s.best.len() {
@@ -175,7 +185,9 @@ fn lower_values<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> b
 }
 
 /// Pass 3: lower adjacent pairs of choices together.
-fn lower_pairs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool uses F::E {
+fn lower_pairs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bool
+uses F::E
+{
     var improved = false
     var index: usize = 0
     while index + 1 < s.best.len() {
@@ -198,7 +210,15 @@ fn lower_pairs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bo
 }
 
 /// Shrinks the failing `choices`, whose verdict was `target`.
-pub fn shrink<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u64>, _ target: Verdict, _ max_choices: usize, _ budget: u64) -> ShrinkResult uses F::E {
+pub fn shrink<F: Fn(mut Source) -> Verdict>(
+    _ test: F,
+    _ choices: MemVec<u64>,
+    _ target: Verdict,
+    _ max_choices: usize,
+    _ budget: u64,
+) -> ShrinkResult
+uses F::E
+{
     var s = Shrinker {
         best: copy_choices(choices),
         target,

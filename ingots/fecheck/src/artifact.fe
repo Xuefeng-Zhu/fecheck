@@ -81,16 +81,43 @@ impl ParseError {
         match self {
             ParseError::TooLarge => write!(mut out, "file is larger than ", MAX_FILE, " bytes"),
             ParseError::LineTooLong { line } => write!(mut out, "line ", line, " is too long"),
-            ParseError::MissingHeader => write!(mut out, "not a FeCheck case file (missing `fecheck-case` header)"),
-            ParseError::UnsupportedSchema { found } => write!(mut out, "unsupported schema version ", found, " (this FeCheck reads version ", SCHEMA_VERSION, ")"),
-            ParseError::UnexpectedKey { line } => write!(mut out, "unexpected or out-of-order key on line ", line),
-            ParseError::MissingKey { line } => write!(mut out, "required key missing at line ", line),
+            ParseError::MissingHeader => write!(
+                mut out,
+                "not a FeCheck case file (missing `fecheck-case` header)",
+            ),
+            ParseError::UnsupportedSchema { found } => write!(
+                mut out,
+                "unsupported schema version ",
+                found,
+                " (this FeCheck reads version ",
+                SCHEMA_VERSION,
+                ")",
+            ),
+            ParseError::UnexpectedKey { line } => write!(
+                mut out,
+                "unexpected or out-of-order key on line ",
+                line,
+            ),
+            ParseError::MissingKey { line } => write!(
+                mut out,
+                "required key missing at line ",
+                line,
+            ),
             ParseError::BadNumber { line } => write!(mut out, "invalid number on line ", line),
             ParseError::BadVerdict { line } => write!(mut out, "invalid verdict on line ", line),
-            ParseError::TooManyChoices => write!(mut out, "more than ", MAX_CASE_CHOICES, " choices"),
+            ParseError::TooManyChoices => write!(
+                mut out,
+                "more than ",
+                MAX_CASE_CHOICES,
+                " choices",
+            ),
             ParseError::TooManyOps => write!(mut out, "more than ", MAX_CASE_OPS, " operations"),
             ParseError::Truncated => write!(mut out, "file is truncated (no `end` line)"),
-            ParseError::TrailingData { line } => write!(mut out, "unexpected data after `end` on line ", line),
+            ParseError::TrailingData { line } => write!(
+                mut out,
+                "unexpected data after `end` on line ",
+                line,
+            ),
         }
     }
 }
@@ -100,7 +127,10 @@ impl Copy for ParseError {}
 /// Renders `case` in the schema-1 text format.
 pub fn encode(_ case: Case) -> MemBuffer {
     var out = MemBuffer::new(0)
-    writeln!(mut out, "# FeCheck regression case. Replay with: fecheck replay <this file>")
+    writeln!(
+        mut out,
+        "# FeCheck regression case. Replay with: fecheck replay <this file>",
+    )
     writeln!(mut out, "fecheck-case ", SCHEMA_VERSION)
     writeln!(mut out, "test ", case.test)
     writeln!(mut out, "target ", case.target)
@@ -109,7 +139,13 @@ pub fn encode(_ case: Case) -> MemBuffer {
     writeln!(mut out, "seed ", case.seed)
     writeln!(mut out, "case ", case.case_index)
     writeln!(mut out, "cases ", case.cases)
-    writeln!(mut out, "verdict ", kind_name(case.verdict.kind()), " ", case.verdict.code())
+    writeln!(
+        mut out,
+        "verdict ",
+        kind_name(case.verdict.kind()),
+        " ",
+        case.verdict.code(),
+    )
     if case.has_failed_step {
         writeln!(mut out, "failed-step ", case.failed_step)
     } else {
@@ -131,21 +167,33 @@ pub fn encode(_ case: Case) -> MemBuffer {
 
 /// The keys of the format, in order. `op` (index 12) may repeat.
 fn expected_key(_ index: u64) -> String<15> {
-    if index == 0 { "fecheck-case" }
-    else if index == 1 { "test" }
-    else if index == 2 { "target" }
-    else if index == 3 { "compiler" }
-    else if index == 4 { "fecheck" }
-    else if index == 5 { "seed" }
-    else if index == 6 { "case" }
-    else if index == 7 { "cases" }
-    else if index == 8 { "verdict" }
-    else if index == 9 { "failed-step" }
-    else if index == 10 { "original-length" }
-    else if index == 11 { "choices" }
-    else if index == 12 { "op" }
-    else if index == 13 { "violation" }
-    else { "end" }
+    if index == 0 {
+        "fecheck-case"
+    } else if index == 1 {
+        "test"
+    } else if index == 2 {
+        "target"
+    } else if index == 3 {
+        "compiler"
+    } else if index == 4 {
+        "fecheck"
+    } else if index == 5 {
+        "seed"
+    } else if index == 6 {
+        "case"
+    } else if index == 7 {
+        "cases"
+    } else if index == 8 {
+        "verdict"
+    } else if index == 9 {
+        "failed-step"
+    } else if index == 10 {
+        "original-length"
+    } else if index == 11 {
+        "choices"
+    } else if index == 12 {
+        "op"
+    } else if index == 13 { "violation" } else { "end" }
 }
 
 /// Parses a decimal u64; `None` on anything else, including overflow.
@@ -165,7 +213,7 @@ pub fn parse_u64(_ text: MemSpan) -> Option<u64> {
             } else {
                 Option::Some(v.downcast_saturate())
             }
-        }
+        },
         Option::None => Option::None,
     }
 }
@@ -231,8 +279,8 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
             Option::Some(i) => {
                 key_len = i
                 rest_start = i + 1
-            }
-            Option::None => {}
+            },
+            Option::None => {},
         }
         let key = trimmed.slice(offset: 0, len: key_len)
         let rest = trimmed.slice(offset: rest_start, len: trimmed.len() - rest_start)
@@ -262,8 +310,10 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                         return Result::Err(ParseError::UnsupportedSchema { found: v })
                     }
                     case.schema = v
-                }
-                Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                },
+                Option::None => {
+                    return Result::Err(ParseError::BadNumber { line: line_no })
+                },
             }
         } else if key_index == 1 {
             if rest.len() == 0 {
@@ -279,12 +329,19 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         } else if key_index == 5 || key_index == 6 || key_index == 7 || key_index == 10 {
             match parse_u64(rest) {
                 Option::Some(v) => {
-                    if key_index == 5 { case.seed = v }
-                    else if key_index == 6 { case.case_index = v }
-                    else if key_index == 7 { case.cases = v }
-                    else { case.original_length = v }
-                }
-                Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                    if key_index == 5 {
+                        case.seed = v
+                    } else if key_index == 6 {
+                        case.case_index = v
+                    } else if key_index == 7 {
+                        case.cases = v
+                    } else {
+                        case.original_length = v
+                    }
+                },
+                Option::None => {
+                    return Result::Err(ParseError::BadNumber { line: line_no })
+                },
             }
         } else if key_index == 8 {
             match rest.index_of(b' ') {
@@ -293,15 +350,21 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     let code_text = rest.slice(offset: i + 1, len: rest.len() - i - 1)
                     let kind = match verdict_kind(name) {
                         Option::Some(k) => k,
-                        Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+                        Option::None => {
+                            return Result::Err(ParseError::BadVerdict { line: line_no })
+                        },
                     }
                     let code = match parse_u64(code_text) {
                         Option::Some(c) => c,
-                        Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+                        Option::None => {
+                            return Result::Err(ParseError::BadVerdict { line: line_no })
+                        },
                     }
                     case.verdict = verdict_from_parts(kind, code)
-                }
-                Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+                },
+                Option::None => {
+                    return Result::Err(ParseError::BadVerdict { line: line_no })
+                },
             }
         } else if key_index == 9 {
             if rest == "none" {
@@ -311,8 +374,10 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     Option::Some(v) => {
                         case.failed_step = v
                         case.has_failed_step = true
-                    }
-                    Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                    },
+                    Option::None => {
+                        return Result::Err(ParseError::BadNumber { line: line_no })
+                    },
                 }
             }
         } else if key_index == 11 {
@@ -326,7 +391,9 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     }
                     match parse_u64(field) {
                         Option::Some(v) => case.choices.push(v),
-                        Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                        Option::None => {
+                            return Result::Err(ParseError::BadNumber { line: line_no })
+                        },
                     }
                 }
             }

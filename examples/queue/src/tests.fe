@@ -1,10 +1,27 @@
-use fecheck::{len64, copy_choices, Source, Config, check, steps, run_steps, run_traced, ensure, vec_of, uint_in, Gen, POSTCONDITION_MISMATCH}
+use fecheck::{
+    len64,
+    copy_choices,
+    Source,
+    Config,
+    check,
+    steps,
+    run_steps,
+    run_traced,
+    ensure,
+    vec_of,
+    uint_in,
+    Gen,
+    POSTCONDITION_MISMATCH,
+}
 use super::machine::{against_masked, against_mod}
 use super::ring::{BoundedQueue, ModRing, MaskedRing, CAPACITY}
 
 #[test]
 fn finds_wraparound_bug() {
-    let report = check(|src: mut Source| run_steps(against_masked(), mut src, steps(30, 10)), Config::new(seed: 2026, cases: 1000))
+    let report = check(
+        |src: mut Source| run_steps(against_masked(), mut src, steps(30, 10)),
+        Config::new(seed: 2026, cases: 1000),
+    )
     assert!(report.failed())
     assert!(report.shrunk_verdict.code() == POSTCONDITION_MISMATCH)
     var src = Source::replay(copy_choices(report.shrunk), 4096)
@@ -16,7 +33,10 @@ fn finds_wraparound_bug() {
 
 #[test]
 fn mod_ring_passes_state_machine() {
-    let report = check(|src: mut Source| run_steps(against_mod(), mut src, steps(30, 10)), Config::new(seed: 2026, cases: 1000))
+    let report = check(
+        |src: mut Source| run_steps(against_mod(), mut src, steps(30, 10)),
+        Config::new(seed: 2026, cases: 1000),
+    )
     assert!(report.passed())
 }
 
@@ -24,55 +44,92 @@ fn mod_ring_passes_state_machine() {
 // returns the first CAPACITY values in order.
 #[test]
 fn round_trip_property() {
-    let report = check(|src: mut Source| {
-        let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
-        var q = ModRing::new()
-        for v in values {
-            let _ = q.push(v)
-        }
-        var ok = true
-        var i: usize = 0
-        while i < values.len() && len64(i) < CAPACITY {
-            match q.pop() {
-                Option::Some(x) => { if x != values[i] { ok = false } }
-                Option::None => { ok = false }
+    let report = check(
+        |src: mut Source| {
+            let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
+            var q = ModRing::new()
+            for v in values {
+                let _ = q.push(v)
             }
-            i += 1
-        }
-        ensure(ok && q.len() == 0, 1)
-    }, Config::new(seed: 5, cases: 300))
+            var ok = true
+            var i: usize = 0
+            while i < values.len() && len64(i) < CAPACITY {
+                match q.pop() {
+                    Option::Some(x) => {
+                        if x != values[i] {
+                            ok = false
+                        }
+                    },
+                    Option::None => {
+                        ok = false
+                    },
+                }
+                i += 1
+            }
+            ensure(ok && q.len() == 0, 1)
+        },
+        Config::new(seed: 5, cases: 300),
+    )
     assert!(report.passed())
 }
 
 #[test]
 fn round_trip_property_finds_masked_bug() {
     // Interleave a pop so that the ring wraps.
-    let report = check(|src: mut Source| {
-        let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
-        var q = MaskedRing::new()
-        var expected_front: u64 = 0
-        var ok = true
-        var pushed: usize = 0
-        for v in values {
-            if q.len() == CAPACITY {
-                let _ = q.pop()
+    let report = check(
+        |src: mut Source| {
+            let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
+            var q = MaskedRing::new()
+            var ok = true
+            var pushed: usize = 0
+            for v in values {
+                if q.len() == CAPACITY {
+                    let _ = q.pop()
+                }
+                let _ = q.push(v)
+                pushed += 1
             }
-            let _ = q.push(v)
-            pushed += 1
-        }
-        // The last min(len, CAPACITY) values must come out in order.
-        let keep: usize = if pushed < 3 { pushed } else { 3 }
-        var i: usize = pushed - keep
-        while i < pushed {
-            match q.pop() {
-                Option::Some(x) => { if x != values[i] { ok = false } }
-                Option::None => { ok = false }
+            // The last min(len, CAPACITY) values must come out in order.
+            let keep: usize = if pushed < 3 { pushed } else { 3 }
+            var i: usize = pushed - keep
+            while i < pushed {
+                match q.pop() {
+                    Option::Some(x) => {
+                        if x != values[i] {
+                            ok = false
+                        }
+                    },
+                    Option::None => {
+                        ok = false
+                    },
+                }
+                i += 1
             }
-            i += 1
-        }
-        ensure(ok, 7)
-    }, Config::new(seed: 5, cases: 300))
+            ensure(ok, 7)
+        },
+        Config::new(seed: 5, cases: 300),
+    )
     assert!(report.failed())
     // Shrinks to 4 values (one wrap), each the simplest distinguishing value.
     assert!(report.shrunk_verdict.code() == 7)
+}
+
+// Regression test generated by `fecheck run queue --seed 12345`:
+// three Push(0)/Pop pairs wrap the ring, then Push(1), Pop returns 0.
+#[test]
+fn regression_wraparound() {
+    let choices = fecheck::choices_from(
+        [1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1],
+    )
+    var buggy = fecheck::Source::replay(
+        fecheck::copy_choices(choices),
+        fecheck::DEFAULT_MAX_CHOICES,
+    )
+    assert!(
+        fecheck::run_steps(against_masked(), mut buggy, fecheck::steps(40, 12)).is_failure(),
+    )
+    var fixed = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)
+    assert!(
+        fecheck::run_steps(against_mod(), mut fixed, fecheck::steps(40, 12)).is_pass(),
+    )
 }

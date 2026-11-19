@@ -16,12 +16,7 @@ pub trait BoundedQueue {
     fn len(self) -> u64
 }
 
-pub struct MaskedRing {
-    slots: [u64; 4],
-    head: u64,
-    count: u64,
-    tail: u64,
-}
+pub struct MaskedRing { slots: [u64; 4], head: u64, count: u64, tail: u64 }
 
 impl Copy for MaskedRing {}
 
@@ -58,12 +53,7 @@ impl BoundedQueue for MaskedRing {
     }
 }
 
-pub struct ModRing {
-    slots: [u64; 4],
-    head: u64,
-    count: u64,
-    tail: u64,
-}
+pub struct ModRing { slots: [u64; 4], head: u64, count: u64, tail: u64 }
 
 impl Copy for ModRing {}
 
