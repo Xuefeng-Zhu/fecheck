@@ -179,3 +179,19 @@ pub fn simpler(_ a: MemVec<u64>, _ b: MemVec<u64>) -> bool {
     }
     false
 }
+
+/// A length or index as a u64 (`usize` is 256 bits on the EVM and 64 on
+/// native targets, so `as` cannot be used).
+pub fn len64(_ n: usize) -> u64 {
+    n.downcast_saturate()
+}
+
+/// A choice list from an array literal, for checked-in regression tests:
+/// `Source::replay(choices_from([1, 0, 2, 0]), DEFAULT_MAX_CHOICES)`.
+pub fn choices_from<const N: usize>(_ values: [u64; N]) -> MemVec<u64> {
+    var out: MemVec<u64> = MemVec::with_capacity(N)
+    for v in values {
+        out.push(v)
+    }
+    out
+}

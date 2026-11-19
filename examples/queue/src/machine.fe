@@ -1,0 +1,170 @@
+// The FeCheck state machine for bounded queues.
+//
+// The model is a plain list: push appends unless full, pop removes the
+// front. Properties checked after every command:
+//
+// * fifo_order: every pop returns the oldest remaining value (postcondition).
+// * respects_capacity: a push succeeds exactly when the model has room.
+// * length_matches_model: `len()` equals the model's length (invariant).
+
+use core::{MemBuffer, MemVec}
+use core::ops::Eq
+use std::io::Display
+use fecheck::{len64, Source, Verdict, StateMachine, POSTCONDITION_MISMATCH}
+use super::ring::{CAPACITY, BoundedQueue, MaskedRing, ModRing}
+
+pub const LENGTH_MISMATCH: u64 = 1
+
+pub enum Cmd {
+    Push { pub value: u64 },
+    Pop,
+    Len,
+}
+
+impl Copy for Cmd {}
+
+impl Display for Cmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Cmd::Push { value } => write!(mut out, "Push(", value, ")"),
+            Cmd::Pop => write!(mut out, "Pop"),
+            Cmd::Len => write!(mut out, "Len"),
+        }
+    }
+}
+
+pub enum Obs {
+    Pushed,
+    Full,
+    Value { pub value: u64 },
+    Empty,
+    Length { pub n: u64 },
+}
+
+impl Copy for Obs {}
+
+impl Eq for Obs {
+    fn eq(self, _ other: Obs) -> bool {
+        match (self, other) {
+            (Obs::Pushed, Obs::Pushed) => true,
+            (Obs::Full, Obs::Full) => true,
+            (Obs::Empty, Obs::Empty) => true,
+            (Obs::Value { value: a }, Obs::Value { value: b }) => a == b,
+            (Obs::Length { n: a }, Obs::Length { n: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Display for Obs {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Obs::Pushed => write!(mut out, "pushed"),
+            Obs::Full => write!(mut out, "full"),
+            Obs::Value { value } => write!(mut out, "Some(", value, ")"),
+            Obs::Empty => write!(mut out, "None"),
+            Obs::Length { n } => write!(mut out, "len=", n),
+        }
+    }
+}
+
+impl<Q: Copy> Copy for QueueMachine<Q> {}
+
+pub struct QueueMachine<Q> {
+    pub make: Q,
+}
+
+pub fn against_masked() -> QueueMachine<MaskedRing> {
+    QueueMachine { make: MaskedRing::new() }
+}
+
+pub fn against_mod() -> QueueMachine<ModRing> {
+    QueueMachine { make: ModRing::new() }
+}
+
+impl<Q: BoundedQueue + Copy> StateMachine for QueueMachine<Q> {
+    type Cmd = Cmd
+    type Obs = Obs
+    type Model = MemVec<u64>
+    type Sut = Q
+
+    fn new_model(self) -> MemVec<u64> {
+        MemVec::new()
+    }
+
+    fn new_sut(self) -> Q {
+        self.make
+    }
+
+    fn gen_cmd(self, _ src: mut Source, _ model: MemVec<u64>) -> Cmd {
+        let kind = src.draw(2)
+        if kind == 0 {
+            Cmd::Push { value: src.draw(99) }
+        } else if kind == 1 {
+            Cmd::Pop
+        } else {
+            Cmd::Len
+        }
+    }
+
+    fn precondition(self, _ model: MemVec<u64>, _ cmd: Cmd) -> bool {
+        true
+    }
+
+    fn run_model(self, _ model: mut MemVec<u64>, _ cmd: Cmd) -> Obs {
+        match cmd {
+            Cmd::Push { value } => {
+                if len64(model.len()) >= CAPACITY {
+                    Obs::Full
+                } else {
+                    model.push(value)
+                    Obs::Pushed
+                }
+            }
+            Cmd::Pop => {
+                if model.len() == 0 {
+                    Obs::Empty
+                } else {
+                    let front = model[0]
+                    // Shift left: the model favours obviousness over speed.
+                    var i: usize = 1
+                    while i < model.len() {
+                        model[i - 1] = model[i]
+                        i += 1
+                    }
+                    let _ = model.pop()
+                    Obs::Value { value: front }
+                }
+            }
+            Cmd::Len => Obs::Length { n: len64(model.len()) },
+        }
+    }
+
+    fn run_sut(self, _ sut: mut Q, _ cmd: Cmd) -> Obs {
+        match cmd {
+            Cmd::Push { value } => if sut.push(value) { Obs::Pushed } else { Obs::Full },
+            Cmd::Pop => match sut.pop() {
+                Option::Some(v) => Obs::Value { value: v },
+                Option::None => Obs::Empty,
+            },
+            Cmd::Len => Obs::Length { n: sut.len() },
+        }
+    }
+
+    fn invariant(self, _ model: MemVec<u64>, _ sut: Q) -> Verdict {
+        if sut.len() != len64(model.len()) {
+            return Verdict::Fail { code: LENGTH_MISMATCH }
+        }
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        if code == LENGTH_MISMATCH {
+            write!(mut out, "length_matches_model: the queue's length differs from the model's")
+        } else if code == POSTCONDITION_MISMATCH {
+            write!(mut out, "fifo_order/respects_capacity: the queue's result differs from the model's")
+        } else {
+            write!(mut out, "unknown failure code ", code)
+        }
+    }
+}

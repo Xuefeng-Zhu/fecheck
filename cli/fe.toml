@@ -1,0 +1,9 @@
+[ingot]
+name = "fecheck_cli"
+version = "0.1.0"
+target = "native"
+
+[dependencies]
+fecheck = "../ingots/fecheck"
+permissions = "../examples/permissions"
+queue = "../examples/queue"

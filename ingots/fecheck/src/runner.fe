@@ -68,7 +68,7 @@ pub enum Status {
     /// A case failed; the report holds the original and shrunk choices.
     Failed,
     /// The configuration was rejected before any case ran.
-    InvalidConfig { problem: u64 },
+    InvalidConfig { pub problem: u64 },
     /// Too many cases were discarded to reach the requested count.
     GaveUp,
 }

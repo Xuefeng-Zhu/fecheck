@@ -1,0 +1,78 @@
+use fecheck::{len64, copy_choices, Source, Config, check, steps, run_steps, run_traced, ensure, vec_of, uint_in, Gen, POSTCONDITION_MISMATCH}
+use super::machine::{against_masked, against_mod}
+use super::ring::{BoundedQueue, ModRing, MaskedRing, CAPACITY}
+
+#[test]
+fn finds_wraparound_bug() {
+    let report = check(|src: mut Source| run_steps(against_masked(), mut src, steps(30, 10)), Config::new(seed: 2026, cases: 1000))
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == POSTCONDITION_MISMATCH)
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(against_masked(), mut src, steps(30, 10))
+    // The bug needs the write position to wrap, so at least CAPACITY pushes.
+    assert!(trace.len() >= 4)
+    assert!(trace.len() < 10)
+}
+
+#[test]
+fn mod_ring_passes_state_machine() {
+    let report = check(|src: mut Source| run_steps(against_mod(), mut src, steps(30, 10)), Config::new(seed: 2026, cases: 1000))
+    assert!(report.passed())
+}
+
+// A plain property, no state machine: pushing a list and popping it back
+// returns the first CAPACITY values in order.
+#[test]
+fn round_trip_property() {
+    let report = check(|src: mut Source| {
+        let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
+        var q = ModRing::new()
+        for v in values {
+            let _ = q.push(v)
+        }
+        var ok = true
+        var i: usize = 0
+        while i < values.len() && len64(i) < CAPACITY {
+            match q.pop() {
+                Option::Some(x) => { if x != values[i] { ok = false } }
+                Option::None => { ok = false }
+            }
+            i += 1
+        }
+        ensure(ok && q.len() == 0, 1)
+    }, Config::new(seed: 5, cases: 300))
+    assert!(report.passed())
+}
+
+#[test]
+fn round_trip_property_finds_masked_bug() {
+    // Interleave a pop so that the ring wraps.
+    let report = check(|src: mut Source| {
+        let values = vec_of(uint_in(0, 1000), max_len: 6).generate(mut src)
+        var q = MaskedRing::new()
+        var expected_front: u64 = 0
+        var ok = true
+        var pushed: usize = 0
+        for v in values {
+            if q.len() == CAPACITY {
+                let _ = q.pop()
+            }
+            let _ = q.push(v)
+            pushed += 1
+        }
+        // The last min(len, CAPACITY) values must come out in order.
+        let keep: usize = if pushed < 3 { pushed } else { 3 }
+        var i: usize = pushed - keep
+        while i < pushed {
+            match q.pop() {
+                Option::Some(x) => { if x != values[i] { ok = false } }
+                Option::None => { ok = false }
+            }
+            i += 1
+        }
+        ensure(ok, 7)
+    }, Config::new(seed: 5, cases: 300))
+    assert!(report.failed())
+    // Shrinks to 4 values (one wrap), each the simplest distinguishing value.
+    assert!(report.shrunk_verdict.code() == 7)
+}

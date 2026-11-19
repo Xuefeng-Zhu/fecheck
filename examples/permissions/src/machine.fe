@@ -75,6 +75,8 @@ pub struct Sut<S> {
 }
 
 /// Tests any `PermissionApi` implementation built by `make`.
+impl<S: Copy> Copy for PermissionMachine<S> {}
+
 pub struct PermissionMachine<S> {
     pub make: S,
 }

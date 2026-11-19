@@ -1,0 +1,4 @@
+// Demo B: state-machine and property testing of a bounded ring-buffer queue.
+
+pub use ring::{CAPACITY, BoundedQueue, MaskedRing, ModRing}
+pub use machine::{Cmd, Obs, QueueMachine, against_masked, against_mod, LENGTH_MISMATCH}

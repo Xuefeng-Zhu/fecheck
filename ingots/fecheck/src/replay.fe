@@ -19,11 +19,11 @@ pub enum ReplayOutcome {
     /// The case now passes: the bug is fixed (or the test got weaker).
     NoLongerFails,
     /// The case still fails, but differently (other kind, code or step).
-    DifferentFailure { verdict: Verdict, step: u64 },
+    DifferentFailure { pub verdict: Verdict, pub step: u64 },
     /// The case was discarded or overran its budget: the generator changed.
     Invalid,
     /// The regenerated commands differ from the recorded ones at `step`.
-    Drift { step: u64 },
+    Drift { pub step: u64 },
 }
 
 impl Copy for ReplayOutcome {}

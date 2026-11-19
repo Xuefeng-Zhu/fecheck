@@ -1,0 +1,93 @@
+// JSON export of a case and its trace, for viewers and other tools.
+//
+// The `.case` text format is the replayable source of truth; this JSON is a
+// derived, write-only view of the same data plus the per-step trace.
+
+use core::{MemBuffer, MemSpan, MemVec}
+use super::verdict::kind_name
+use super::artifact::{Case, SCHEMA_VERSION, FECHECK_VERSION}
+use super::machine::{Trace, NO_STEP}
+
+/// Appends `text` as a JSON string literal.
+pub fn write_json_string(_ out: mut MemBuffer, _ text: MemSpan) {
+    out.push(b'"')
+    for b in text {
+        if b == b'"' {
+            write!(mut out, "\\\"")
+        } else if b == b'\\' {
+            write!(mut out, "\\\\")
+        } else if b == b'\n' {
+            write!(mut out, "\\n")
+        } else if b < 32 {
+            write!(mut out, "\\u00")
+            out.push(hex_digit(b / 16))
+            out.push(hex_digit(b % 16))
+        } else {
+            out.push(b)
+        }
+    }
+    out.push(b'"')
+}
+
+fn hex_digit(_ n: u8) -> u8 {
+    if n < 10 { b'0' + n } else { b'a' + n - 10 }
+}
+
+/// The case and its trace as one JSON document.
+pub fn case_json(_ case: Case, _ trace: Trace) -> MemBuffer {
+    var out = MemBuffer::new(0)
+    writeln!(mut out, "{")
+    writeln!(mut out, "  \"schemaVersion\": ", SCHEMA_VERSION, ",")
+    write!(mut out, "  \"test\": ")
+    write_json_string(mut out, case.test.span())
+    writeln!(mut out, ",")
+    write!(mut out, "  \"target\": ")
+    write_json_string(mut out, case.target.span())
+    writeln!(mut out, ",")
+    write!(mut out, "  \"compilerVersion\": ")
+    write_json_string(mut out, case.compiler.span())
+    writeln!(mut out, ",")
+    writeln!(mut out, "  \"fecheckVersion\": \"", FECHECK_VERSION, "\",")
+    writeln!(mut out, "  \"seed\": \"", case.seed, "\",")
+    writeln!(mut out, "  \"caseIndex\": ", case.case_index, ",")
+    writeln!(mut out, "  \"cases\": ", case.cases, ",")
+    writeln!(mut out, "  \"originalLength\": ", case.original_length, ",")
+    writeln!(mut out, "  \"shrunkLength\": ", trace.len(), ",")
+    write!(mut out, "  \"choices\": [")
+    var first = true
+    for c in case.choices {
+        if !first {
+            write!(mut out, ", ")
+        }
+        write!(mut out, "\"", c, "\"")
+        first = false
+    }
+    writeln!(mut out, "],")
+    write!(mut out, "  \"operations\": [")
+    var i: usize = 0
+    while i < trace.steps.len() {
+        if i > 0 {
+            write!(mut out, ",")
+        }
+        write!(mut out, "\n    {\"index\": ", trace.steps[i].index, ", \"command\": ")
+        write_json_string(mut out, trace.steps[i].command.span())
+        write!(mut out, ", \"skipped\": ", trace.steps[i].skipped, ", \"expected\": ")
+        write_json_string(mut out, trace.steps[i].expected.span())
+        write!(mut out, ", \"actual\": ")
+        write_json_string(mut out, trace.steps[i].actual.span())
+        write!(mut out, ", \"verdict\": \"", kind_name(trace.steps[i].verdict.kind()), "\", \"code\": ", trace.steps[i].verdict.code(), "}")
+        i += 1
+    }
+    writeln!(mut out, "\n  ],")
+    write!(mut out, "  \"failure\": {\"verdict\": \"", kind_name(case.verdict.kind()), "\", \"code\": ", case.verdict.code(), ", \"operationIndex\": ")
+    if trace.failed_step == NO_STEP {
+        write!(mut out, "null")
+    } else {
+        write!(mut out, trace.failed_step)
+    }
+    write!(mut out, ", \"property\": ")
+    write_json_string(mut out, case.violation.span())
+    writeln!(mut out, "}")
+    writeln!(mut out, "}")
+    out
+}

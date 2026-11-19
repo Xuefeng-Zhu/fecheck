@@ -1,0 +1,478 @@
+// fecheck: the command-line runner.
+//
+//   fecheck list
+//   fecheck run <test> [--seed N] [--cases N] [--steps N] [--save FILE] [--json FILE] [--no-shrink]
+//   fecheck replay <file> [--against TARGET] [--json FILE]
+//   fecheck demo [--seed N] [--dir DIR]
+//
+// Exit status: 0 success (passed / failure reproduced as expected by
+// `replay`), 1 property failed, 2 usage or configuration error, 3 replay did
+// not reproduce, 4 malformed or incompatible case file.
+//
+// All testing logic lives in the `fecheck` ingot; this file only parses
+// arguments, prints, and reads or writes files. Those are the only
+// functions that declare the `Stdout` and `Fs` effects.
+
+use core::{MemBuffer, MemSpan, MemVec}
+use std::env::Args
+use std::fs::Fs
+use std::io::Stdout
+use fecheck::{
+    Source, Config, Report, Status, StateMachine, Steps, Trace, Case, ParseError, ReplayOutcome,
+    check, steps, run_steps, run_traced, encode, decode, parse_u64, machine_case, replay_machine,
+    case_json, copy_choices, len64, kind_name, DEFAULT_MAX_CHOICES, NO_STEP,
+}
+use permissions::{against_cached, against_fixed}
+use queue::{against_masked, against_mod}
+
+pub const COMPILER: String<9> = "fe 26.6.0"
+
+const EXIT_OK: i32 = 0
+const EXIT_FAILED: i32 = 1
+const EXIT_USAGE: i32 = 2
+const EXIT_NOT_REPRODUCED: i32 = 3
+const EXIT_BAD_CASE: i32 = 4
+
+/// Command-line options shared by the subcommands.
+struct Options {
+    seed: u64,
+    cases: u64,
+    max_steps: u64,
+    shrink: bool,
+    save: MemBuffer,
+    json: MemBuffer,
+    against: MemBuffer,
+    dir: MemBuffer,
+    error: bool,
+}
+
+pub fn main() -> i32 uses (out: mut Stdout, args: Args, fs: mut Fs) {
+    if args.count() < 2 {
+        usage()
+        return EXIT_USAGE
+    }
+    let command = args.get(1)
+    if command == "list" {
+        list()
+        return EXIT_OK
+    }
+    if command == "help" || command == "--help" || command == "-h" {
+        usage()
+        return EXIT_OK
+    }
+    if command == "run" {
+        if args.count() < 3 {
+            usage()
+            return EXIT_USAGE
+        }
+        let opts = parse_options(3)
+        if opts.error {
+            return EXIT_USAGE
+        }
+        return run_named(args.get(2).span(), opts)
+    }
+    if command == "replay" {
+        if args.count() < 3 {
+            usage()
+            return EXIT_USAGE
+        }
+        let opts = parse_options(3)
+        if opts.error {
+            return EXIT_USAGE
+        }
+        return replay_file(args.get(2).span(), opts)
+    }
+    if command == "demo" {
+        let opts = parse_options(2)
+        if opts.error {
+            return EXIT_USAGE
+        }
+        return demo(opts)
+    }
+    println!("fecheck: unknown command `", command, "`")
+    usage()
+    EXIT_USAGE
+}
+
+fn usage() uses (out: mut Stdout) {
+    println!("FeCheck - property-based and state-machine testing for Fe")
+    println!()
+    println!("usage:")
+    println!("  fecheck list")
+    println!("  fecheck run <test> [--seed N] [--cases N] [--steps N] [--save FILE] [--json FILE] [--no-shrink]")
+    println!("  fecheck replay <file> [--against TARGET] [--json FILE]")
+    println!("  fecheck demo [--seed N] [--dir DIR]")
+    println!()
+    println!("exit status: 0 ok, 1 property failed, 2 usage error, 3 replay did not reproduce, 4 bad case file")
+}
+
+fn list() uses (out: mut Stdout) {
+    println!("Tests (name -> implementation under test):")
+    println!("  permissions        revoked_agent_cannot_execute  against the cached system (has a bug)")
+    println!("  permissions-fixed  revoked_agent_cannot_execute  against the fixed system")
+    println!("  queue              bounded_queue_matches_model   against MaskedRing (has a bug)")
+    println!("  queue-fixed        bounded_queue_matches_model   against ModRing")
+}
+
+fn parse_options(_ first: usize) -> Options uses (out: mut Stdout, args: Args) {
+    var opts = Options {
+        seed: 12345,
+        cases: 1000,
+        max_steps: 40,
+        shrink: true,
+        save: MemBuffer::new(0),
+        json: MemBuffer::new(0),
+        against: MemBuffer::new(0),
+        dir: format!("failures"),
+        error: false,
+    }
+    var i = first
+    while i < args.count() {
+        let flag = args.get(i)
+        if flag == "--no-shrink" {
+            opts.shrink = false
+            i += 1
+            continue
+        }
+        if i + 1 >= args.count() {
+            println!("fecheck: `", flag, "` needs a value")
+            opts.error = true
+            return opts
+        }
+        let value = args.get(i + 1)
+        if flag == "--seed" || flag == "--cases" || flag == "--steps" {
+            match parse_u64(value.span()) {
+                Option::Some(n) => {
+                    if flag == "--seed" {
+                        opts.seed = n
+                    } else if flag == "--cases" {
+                        opts.cases = n
+                    } else {
+                        opts.max_steps = n
+                    }
+                }
+                Option::None => {
+                    println!("fecheck: `", flag, "` needs a whole number, got `", value, "`")
+                    opts.error = true
+                    return opts
+                }
+            }
+        } else if flag == "--save" {
+            opts.save = format!(value)
+        } else if flag == "--json" {
+            opts.json = format!(value)
+        } else if flag == "--against" {
+            opts.against = format!(value)
+        } else if flag == "--dir" {
+            opts.dir = format!(value)
+        } else {
+            println!("fecheck: unknown option `", flag, "`")
+            opts.error = true
+            return opts
+        }
+        i += 2
+    }
+    opts
+}
+
+/// The property name and default target of test `name`.
+fn property_of(_ name: MemSpan) -> MemBuffer {
+    if name.starts_with("permissions") {
+        format!("revoked_agent_cannot_execute")
+    } else {
+        format!("bounded_queue_matches_model")
+    }
+}
+
+fn run_named(_ name: MemSpan, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+    let s = steps(opts.max_steps, 12)
+    if name == "permissions" {
+        return run_machine(against_cached(), s, format!(name), opts)
+    }
+    if name == "permissions-fixed" {
+        return run_machine(against_fixed(), s, format!(name), opts)
+    }
+    if name == "queue" {
+        return run_machine(against_masked(), s, format!(name), opts)
+    }
+    if name == "queue-fixed" {
+        return run_machine(against_mod(), s, format!(name), opts)
+    }
+    println!("fecheck: unknown test `", name, "` (see `fecheck list`)")
+    EXIT_USAGE
+}
+
+fn header() uses (out: mut Stdout) {
+    println!("FeCheck - Property Testing for Fe")
+}
+
+/// Runs a state-machine test, prints the report, and saves the case.
+fn run_machine<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ target: own MemBuffer, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+    var config = Config::new(seed: opts.seed, cases: opts.cases)
+    if !opts.shrink {
+        config.shrink_budget = 0
+    }
+    let property = property_of(target.span())
+    header()
+    println!("Test:    ", property)
+    println!("Target:  ", target)
+    println!("Seed:    ", opts.seed)
+    println!("Cases:   ", opts.cases, " (up to ", opts.max_steps, " operations each)")
+
+    let report = check(|src: mut Source| run_steps(machine, mut src, s), config)
+    match report.status {
+        Status::Passed => {
+            println!()
+            println!("Property passed: ", report.passed, " cases, ", report.discarded, " discarded.")
+            return EXIT_OK
+        }
+        Status::InvalidConfig { problem } => {
+            println!()
+            println!("Invalid configuration (problem ", problem, "): --cases must be between 1 and 100000000.")
+            return EXIT_USAGE
+        }
+        Status::GaveUp => {
+            println!()
+            println!("Gave up: too many discarded cases (", report.discarded, ").")
+            return EXIT_FAILED
+        }
+        Status::Failed => {}
+    }
+
+    // Trace the original and shrunk failures.
+    var original_src = Source::replay(copy_choices(report.original), DEFAULT_MAX_CHOICES)
+    let original = run_traced(machine, mut original_src, s)
+    var shrunk_src = Source::replay(copy_choices(report.shrunk), DEFAULT_MAX_CHOICES)
+    let trace = run_traced(machine, mut shrunk_src, s)
+
+    println!()
+    println!("Property failed on case ", report.failing_case + 1, " of ", opts.cases, ".")
+    println!("Original: ", original.len(), " operations (", report.original.len(), " choices)")
+    println!("Shrunk:   ", trace.len(), " operations (", report.shrunk.len(), " choices) after ", report.shrink.attempts, " candidates, ", report.shrink.accepted, " accepted")
+    if report.shrink.budget_exhausted {
+        println!("          (shrink budget exhausted; the case may shrink further)")
+    }
+    print_trace("Counterexample:", trace)
+
+    let case = machine_case(
+        test: property,
+        target,
+        compiler: format!(COMPILER),
+        seed: opts.seed,
+        case_index: report.failing_case,
+        cases: opts.cases,
+        original_length: original.len(),
+        report.shrunk,
+        trace,
+    )
+    let path = if opts.save.len() > 0 { format!(opts.save) } else { format!(opts.dir, "/", case.target, ".case") }
+    if opts.save.len() == 0 {
+        let _ = fs.create_dir_all(format!(opts.dir))
+    }
+    match fs.write(format!(path), encode(case).span()) {
+        Result::Ok(_) => {
+            println!("Replay artifact:")
+            println!("  ", path)
+            println!("Reproduce with:")
+            println!("  fecheck replay ", path)
+        }
+        Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
+    }
+    if opts.json.len() > 0 {
+        write_json(opts.json.span(), case, trace)
+    }
+    print_snippet(case)
+    EXIT_FAILED
+}
+
+fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace) uses (out: mut Stdout, fs: mut Fs) {
+    match fs.write(format!(path), case_json(case, trace).span()) {
+        Result::Ok(_) => println!("Trace JSON: ", path),
+        Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
+    }
+}
+
+fn print_trace(_ heading: String<16>, _ trace: Trace) uses (out: mut Stdout) {
+    println!(heading)
+    for ref step in trace.steps {
+        if step.skipped {
+            println!("  ", step.index + 1, ". ", step.command, "   (skipped: precondition false)")
+        } else if step.index == trace.failed_step {
+            println!("  ", step.index + 1, ". ", step.command, "   -> expected ", step.expected, ", got ", step.actual, "   <-- violation")
+        } else {
+            println!("  ", step.index + 1, ". ", step.command, "   -> ", step.actual)
+        }
+    }
+    if trace.failed_step != NO_STEP {
+        println!("Violation:")
+        println!("  ", trace.explanation)
+    }
+}
+
+/// Prints a regression test the user can paste into their own `fe test` suite.
+fn print_snippet(_ case: Case) uses (out: mut Stdout) {
+    println!("Regression test (paste into a test module):")
+    println!("  #[test]")
+    println!("  fn regression_", case.test, "() {")
+    print!("      let choices = fecheck::choices_from([")
+    var first = true
+    for c in case.choices {
+        if !first {
+            print!(", ")
+        }
+        print!(c)
+        first = false
+    }
+    println!("])")
+    println!("      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)")
+    println!("      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())")
+    println!("  }")
+}
+
+fn describe_parse_error(_ e: ParseError) -> MemBuffer {
+    var text = MemBuffer::new(0)
+    e.describe(mut text)
+    text
+}
+
+fn replay_file(_ path: MemSpan, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+    header()
+    let bytes = match fs.read(format!(path)) {
+        Result::Ok(b) => b,
+        Result::Err(e) => {
+            println!("fecheck: cannot read ", path, ": ", e)
+            return EXIT_BAD_CASE
+        }
+    }
+    let case = match decode(bytes.span()) {
+        Result::Ok(c) => c,
+        Result::Err(e) => {
+            println!("fecheck: ", path, " is not a valid case file: ", describe_parse_error(e))
+            return EXIT_BAD_CASE
+        }
+    }
+    let target = if opts.against.len() > 0 { format!(opts.against) } else { format!(case.target) }
+    println!("Case:    ", path)
+    println!("Test:    ", case.test)
+    println!("Found against: ", case.target, " (", case.compiler, ", seed ", case.seed, ", case ", case.case_index + 1, ")")
+    println!("Replaying against: ", target)
+    if case.compiler != COMPILER {
+        println!("note: recorded with ", case.compiler, ", replaying with ", COMPILER)
+    }
+    // A case may only be replayed against a target of the same test family.
+    let family_ok = (case.test == "revoked_agent_cannot_execute" && target.span().starts_with("permissions"))
+        || (case.test == "bounded_queue_matches_model" && target.span().starts_with("queue"))
+    if !family_ok {
+        println!("fecheck: target `", target, "` cannot run test `", case.test, "` (see `fecheck list`)")
+        return EXIT_BAD_CASE
+    }
+    let s = steps(40, 12)
+    if target == "permissions" {
+        return finish_replay(against_cached(), s, case, opts)
+    }
+    if target == "permissions-fixed" {
+        return finish_replay(against_fixed(), s, case, opts)
+    }
+    if target == "queue" {
+        return finish_replay(against_masked(), s, case, opts)
+    }
+    if target == "queue-fixed" {
+        return finish_replay(against_mod(), s, case, opts)
+    }
+    println!("fecheck: unknown target `", target, "` (see `fecheck list`)")
+    EXIT_BAD_CASE
+}
+
+fn finish_replay<M: StateMachine + Copy>(_ machine: M, _ s: Steps, _ case: Case, _ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+    let (outcome, trace) = replay_machine(machine, s, case)
+    println!()
+    print_trace("Replayed:", trace)
+    if opts.json.len() > 0 {
+        write_json(opts.json.span(), case, trace)
+    }
+    println!()
+    match outcome {
+        ReplayOutcome::Reproduced => {
+            println!("REPRODUCED: the recorded failure happened again at operation ", trace.failed_step + 1, ".")
+            EXIT_OK
+        }
+        ReplayOutcome::NoLongerFails => {
+            println!("NOT REPRODUCED: all ", trace.len(), " recorded operations now pass. The regression is fixed.")
+            EXIT_NOT_REPRODUCED
+        }
+        ReplayOutcome::DifferentFailure { verdict, step } => {
+            println!("DIFFERENT FAILURE: ", kind_name(verdict.kind()), " code ", verdict.code(), " at operation ", step + 1, " (recorded: ", kind_name(case.verdict.kind()), " code ", case.verdict.code(), ").")
+            EXIT_NOT_REPRODUCED
+        }
+        ReplayOutcome::Invalid => {
+            println!("INVALID: the recorded choices no longer form a valid test case.")
+            EXIT_BAD_CASE
+        }
+        ReplayOutcome::Drift { step } => {
+            println!("DRIFT: operation ", step + 1, " no longer matches the recorded `op` line; the generator or model changed.")
+            EXIT_BAD_CASE
+        }
+    }
+}
+
+/// The scripted end-to-end demonstration.
+fn demo(_ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+    println!("=== 1. Search: permissions system with a decision cache ===")
+    println!()
+    var run_opts = Options {
+        seed: opts.seed, cases: 1000, max_steps: 40, shrink: true,
+        save: MemBuffer::new(0), json: format!(opts.dir, "/permissions.json"), against: MemBuffer::new(0),
+        dir: format!(opts.dir), error: false,
+    }
+    let _ = fs.create_dir_all(format!(opts.dir))
+    let found = run_machine(against_cached(), steps(40, 12), format!("permissions"), run_opts)
+    if found != EXIT_FAILED {
+        println!("demo: expected FeCheck to find the cache bug with seed ", opts.seed)
+        return EXIT_FAILED
+    }
+    let case_path = format!(opts.dir, "/permissions.case")
+    println!()
+    println!("=== 2. Replay the saved case against the same (buggy) system ===")
+    println!()
+    let replay_opts = Options {
+        seed: 0, cases: 0, max_steps: 40, shrink: true,
+        save: MemBuffer::new(0), json: MemBuffer::new(0), against: MemBuffer::new(0),
+        dir: MemBuffer::new(0), error: false,
+    }
+    let again = replay_file(case_path.span(), replay_opts)
+    println!()
+    println!("=== 3. Replay the same case against the fixed system ===")
+    println!()
+    let fixed_opts = Options {
+        seed: 0, cases: 0, max_steps: 40, shrink: true,
+        save: MemBuffer::new(0), json: MemBuffer::new(0), against: format!("permissions-fixed"),
+        dir: MemBuffer::new(0), error: false,
+    }
+    let fixed = replay_file(case_path.span(), fixed_opts)
+    println!()
+    println!("=== 4. Search: bounded ring-buffer queue ===")
+    println!()
+    run_opts.json = format!(opts.dir, "/queue.json")
+    let queue_found = run_machine(against_masked(), steps(40, 12), format!("queue"), run_opts)
+    let queue_case = format!(opts.dir, "/queue.case")
+    println!()
+    println!("=== 5. Replay the queue case against the fixed queue ===")
+    println!()
+    let queue_fixed_opts = Options {
+        seed: 0, cases: 0, max_steps: 40, shrink: true,
+        save: MemBuffer::new(0), json: MemBuffer::new(0), against: format!("queue-fixed"),
+        dir: MemBuffer::new(0), error: false,
+    }
+    let queue_fixed = replay_file(queue_case.span(), queue_fixed_opts)
+    println!()
+    println!("=== Summary ===")
+    let ok = found == EXIT_FAILED && again == EXIT_OK && fixed == EXIT_NOT_REPRODUCED
+        && queue_found == EXIT_FAILED && queue_fixed == EXIT_NOT_REPRODUCED
+    println!("  permissions: bug found, shrunk, replayed, and gone in the fixed system: ", ok_text(found == EXIT_FAILED && again == EXIT_OK && fixed == EXIT_NOT_REPRODUCED))
+    println!("  queue:       bug found, shrunk, and gone in the fixed queue:            ", ok_text(queue_found == EXIT_FAILED && queue_fixed == EXIT_NOT_REPRODUCED))
+    if ok { EXIT_OK } else { EXIT_FAILED }
+}
+
+fn ok_text(_ ok: bool) -> String<4> {
+    if ok { "yes" } else { "NO" }
+}

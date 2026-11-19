@@ -62,17 +62,17 @@ pub struct Case {
 /// Why a case file was rejected.
 pub enum ParseError {
     TooLarge,
-    LineTooLong { line: u64 },
+    LineTooLong { pub line: u64 },
     MissingHeader,
-    UnsupportedSchema { found: u64 },
-    UnexpectedKey { line: u64 },
-    MissingKey { line: u64 },
-    BadNumber { line: u64 },
-    BadVerdict { line: u64 },
+    UnsupportedSchema { pub found: u64 },
+    UnexpectedKey { pub line: u64 },
+    MissingKey { pub line: u64 },
+    BadNumber { pub line: u64 },
+    BadVerdict { pub line: u64 },
     TooManyChoices,
     TooManyOps,
     Truncated,
-    TrailingData { line: u64 },
+    TrailingData { pub line: u64 },
 }
 
 impl ParseError {
