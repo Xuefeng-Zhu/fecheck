@@ -1,0 +1,180 @@
+// The FeCheck state machine for the permission system.
+//
+// The model is the specification: a set of granted agents, no cache.
+
+use core::MemBuffer
+use core::ops::Eq
+use std::io::Display
+use fecheck::{Source, Verdict, StateMachine, POSTCONDITION_MISMATCH}
+use super::system::{AGENTS, PermissionApi, CachedPermissions, FixedPermissions, idx}
+
+/// Failure code: an agent without a current grant was allowed to execute.
+pub const REVOKED_AGENT_EXECUTED: u64 = 1
+
+pub enum Cmd {
+    Grant { pub agent: u64 },
+    Revoke { pub agent: u64 },
+    Execute { pub agent: u64 },
+}
+
+impl Copy for Cmd {}
+
+impl Display for Cmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Cmd::Grant { agent } => write!(mut out, "Grant(agent=", agent, ")"),
+            Cmd::Revoke { agent } => write!(mut out, "Revoke(agent=", agent, ")"),
+            Cmd::Execute { agent } => write!(mut out, "Execute(agent=", agent, ")"),
+        }
+    }
+}
+
+/// What a command visibly did.
+pub enum Obs {
+    Done,
+    Allowed,
+    Denied,
+}
+
+impl Copy for Obs {}
+
+impl Eq for Obs {
+    fn eq(self, _ other: Obs) -> bool {
+        obs_code(self) == obs_code(other)
+    }
+}
+
+fn obs_code(_ o: Obs) -> u8 {
+    match o {
+        Obs::Done => 0,
+        Obs::Allowed => 1,
+        Obs::Denied => 2,
+    }
+}
+
+impl Display for Obs {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Obs::Done => write!(mut out, "ok"),
+            Obs::Allowed => write!(mut out, "allowed"),
+            Obs::Denied => write!(mut out, "denied"),
+        }
+    }
+}
+
+pub struct Model {
+    pub granted: [bool; 4],
+}
+
+/// The system under test plus what it last decided, for the invariant.
+pub struct Sut<S> {
+    pub system: S,
+    /// Set by an `Execute` that the system allowed, for the invariant.
+    pub allowed_now: bool,
+    pub allowed_agent: u64,
+}
+
+/// Tests any `PermissionApi` implementation built by `make`.
+pub struct PermissionMachine<S> {
+    pub make: S,
+}
+
+pub fn against_cached() -> PermissionMachine<CachedPermissions> {
+    PermissionMachine { make: CachedPermissions::new() }
+}
+
+pub fn against_fixed() -> PermissionMachine<FixedPermissions> {
+    PermissionMachine { make: FixedPermissions::new() }
+}
+
+impl<S: PermissionApi + Copy> StateMachine for PermissionMachine<S> {
+    type Cmd = Cmd
+    type Obs = Obs
+    type Model = Model
+    type Sut = Sut<S>
+
+    fn new_model(self) -> Model {
+        Model { granted: [false; 4] }
+    }
+
+    fn new_sut(self) -> Sut<S> {
+        // `make` is a fresh, never-used system; each run copies it.
+        Sut { system: self.make, allowed_now: false, allowed_agent: 0 }
+    }
+
+    fn gen_cmd(self, _ src: mut Source, _ model: Model) -> Cmd {
+        // Kinds are ordered simplest-first, so shrinking prefers grants.
+        let kind = src.draw(2)
+        let agent = src.draw(AGENTS - 1)
+        if kind == 0 {
+            Cmd::Grant { agent }
+        } else if kind == 1 {
+            Cmd::Revoke { agent }
+        } else {
+            Cmd::Execute { agent }
+        }
+    }
+
+    fn precondition(self, _ model: Model, _ cmd: Cmd) -> bool {
+        // Only an existing grant can be revoked.
+        match cmd {
+            Cmd::Revoke { agent } => model.granted[idx(agent)],
+            _ => true,
+        }
+    }
+
+    fn run_model(self, _ model: mut Model, _ cmd: Cmd) -> Obs {
+        match cmd {
+            Cmd::Grant { agent } => {
+                model.granted[idx(agent)] = true
+                Obs::Done
+            }
+            Cmd::Revoke { agent } => {
+                model.granted[idx(agent)] = false
+                Obs::Done
+            }
+            Cmd::Execute { agent } => {
+                if model.granted[idx(agent)] { Obs::Allowed } else { Obs::Denied }
+            }
+        }
+    }
+
+    fn run_sut(self, _ sut: mut Sut<S>, _ cmd: Cmd) -> Obs {
+        sut.allowed_now = false
+        match cmd {
+            Cmd::Grant { agent } => {
+                sut.system.grant(agent)
+                Obs::Done
+            }
+            Cmd::Revoke { agent } => {
+                sut.system.revoke(agent)
+                Obs::Done
+            }
+            Cmd::Execute { agent } => {
+                let allowed = sut.system.execute(agent)
+                sut.allowed_now = allowed
+                sut.allowed_agent = agent
+                if allowed { Obs::Allowed } else { Obs::Denied }
+            }
+        }
+    }
+
+    fn invariant(self, _ model: Model, _ sut: Sut<S>) -> Verdict {
+        // revoked_agent_cannot_execute: an executed action must be backed by
+        // a grant that is still in force.
+        if sut.allowed_now && !model.granted[idx(sut.allowed_agent)] {
+            return Verdict::Fail { code: REVOKED_AGENT_EXECUTED }
+        }
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        if code == REVOKED_AGENT_EXECUTED {
+            write!(mut out, "revoked_agent_cannot_execute: an agent without a current grant was allowed to execute")
+        } else if code == POSTCONDITION_MISMATCH {
+            write!(mut out, "the system's result differs from the model's")
+        } else {
+            write!(mut out, "unknown failure code ", code)
+        }
+    }
+}

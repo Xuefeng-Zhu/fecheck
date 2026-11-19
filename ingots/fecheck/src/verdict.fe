@@ -11,8 +11,8 @@
 pub enum Verdict {
     Pass,
     Discard,
-    Fail { code: u64 },
-    Error { code: u64 },
+    Fail { pub code: u64 },
+    Error { pub code: u64 },
 }
 
 impl Copy for Verdict {}

@@ -1,0 +1,121 @@
+// Deterministic replay of saved cases.
+//
+// Replay feeds a case's recorded choices back into the test. It never uses
+// the PRNG, so the result depends only on the choices and the code under
+// test. For state-machine tests the regenerated commands are compared with
+// the recorded `op` lines first: if the generator or model changed so that
+// the same choices now mean different commands, replay reports drift instead
+// of silently testing something else.
+
+use core::{MemBuffer, MemVec}
+use super::source::{Source, copy_choices, DEFAULT_MAX_CHOICES}
+use super::verdict::Verdict
+use super::artifact::Case
+use super::machine::{StateMachine, Steps, Trace, run_traced, NO_STEP}
+
+pub enum ReplayOutcome {
+    /// The recorded failure happened again, at the same step.
+    Reproduced,
+    /// The case now passes: the bug is fixed (or the test got weaker).
+    NoLongerFails,
+    /// The case still fails, but differently (other kind, code or step).
+    DifferentFailure { verdict: Verdict, step: u64 },
+    /// The case was discarded or overran its budget: the generator changed.
+    Invalid,
+    /// The regenerated commands differ from the recorded ones at `step`.
+    Drift { step: u64 },
+}
+
+impl Copy for ReplayOutcome {}
+
+impl ReplayOutcome {
+    /// 0 reproduced, 1 no longer fails, 2 different failure, 3 invalid, 4 drift.
+    pub fn kind(self) -> u64 {
+        match self {
+            ReplayOutcome::Reproduced => 0,
+            ReplayOutcome::NoLongerFails => 1,
+            ReplayOutcome::DifferentFailure { verdict, step } => 2,
+            ReplayOutcome::Invalid => 3,
+            ReplayOutcome::Drift { step } => 4,
+        }
+    }
+
+    pub fn is_reproduced(self) -> bool {
+        self.kind() == 0
+    }
+}
+
+/// Replays a property-test case.
+pub fn replay_property<F: Fn(mut Source) -> Verdict>(_ test: F, _ case: Case) -> ReplayOutcome uses F::E {
+    var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
+    let v = test(mut src)
+    classify(v, src.overran(), NO_STEP, case)
+}
+
+/// Replays a state-machine case. Returns the outcome and the full trace.
+pub fn replay_machine<M: StateMachine>(_ machine: M, _ steps: Steps, _ case: Case) -> (ReplayOutcome, Trace) {
+    var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
+    let trace = run_traced(machine, mut src, steps)
+    // Every recorded op must be regenerated, in order and verbatim.
+    var i: usize = 0
+    while i < case.ops.len() {
+        if i >= trace.steps.len() {
+            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
+        }
+        if trace.steps[i].command != case.ops[i] {
+            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
+        }
+        i += 1
+    }
+    let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
+    (outcome, trace)
+}
+
+fn classify(_ v: Verdict, _ overran: bool, _ step: u64, _ case: Case) -> ReplayOutcome {
+    if overran || v.is_discard() {
+        return ReplayOutcome::Invalid
+    }
+    if v.is_pass() {
+        return ReplayOutcome::NoLongerFails
+    }
+    let expected_step = if case.has_failed_step { case.failed_step } else { NO_STEP }
+    if v.same_failure(case.verdict) && step == expected_step {
+        return ReplayOutcome::Reproduced
+    }
+    ReplayOutcome::DifferentFailure { verdict: v, step }
+}
+
+/// Builds the case file for a failure found by `check` on a state machine.
+/// `trace` is the traced run of the shrunk choices.
+pub fn machine_case(
+    test: own MemBuffer,
+    target: own MemBuffer,
+    compiler: own MemBuffer,
+    seed: u64,
+    case_index: u64,
+    cases: u64,
+    original_length: u64,
+    _ choices: MemVec<u64>,
+    _ trace: Trace,
+) -> Case {
+    var ops: MemVec<MemBuffer> = MemVec::new()
+    for ref step in trace.steps {
+        ops.push(format!(step.command))
+    }
+    Case {
+        schema: 1,
+        test,
+        target,
+        compiler,
+        seed,
+        case_index,
+        cases,
+        verdict: trace.verdict,
+        failed_step: trace.failed_step,
+        has_failed_step: trace.failed_step != NO_STEP,
+        original_length,
+        choices: copy_choices(choices),
+        ops,
+        violation: format!(trace.explanation),
+    }
+}

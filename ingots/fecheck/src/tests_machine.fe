@@ -1,0 +1,70 @@
+use core::MemBuffer
+use std::io::Display
+use ingot::source::Source
+use ingot::verdict::Verdict
+use ingot::gen::{Gen, uint_in}
+use ingot::runner::{Config, check, run_choices}
+use ingot::machine::{StateMachine, steps, run_steps, run_traced}
+
+// A counter that is wrong once it reaches 3 (an off-by-one saturating add).
+enum CounterCmd {
+    Inc,
+    Add { pub n: u64 },
+}
+impl Copy for CounterCmd {}
+impl Display for CounterCmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            CounterCmd::Inc => write!(mut out, "Inc"),
+            CounterCmd::Add { n } => write!(mut out, "Add(", n, ")"),
+        }
+    }
+}
+
+struct BuggyCounter {}
+
+impl StateMachine for BuggyCounter {
+    type Cmd = CounterCmd
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+
+    fn new_model(self) -> u64 { 0 }
+    fn new_sut(self) -> u64 { 0 }
+    fn gen_cmd(self, _ src: mut Source, _ model: u64) -> CounterCmd {
+        if src.draw_bool() {
+            CounterCmd::Add { n: uint_in(0, 100).generate(mut src) }
+        } else {
+            CounterCmd::Inc
+        }
+    }
+    fn precondition(self, _ model: u64, _ cmd: CounterCmd) -> bool { model < 1000000 }
+    fn run_model(self, _ model: mut u64, _ cmd: CounterCmd) -> u64 {
+        match cmd {
+            CounterCmd::Inc => { model += 1 }
+            CounterCmd::Add { n } => { model += n }
+        }
+        model
+    }
+    fn run_sut(self, _ sut: mut u64, _ cmd: CounterCmd) -> u64 {
+        match cmd {
+            CounterCmd::Inc => { sut += 1 }
+            CounterCmd::Add { n } => { if n > 50 { sut += n - 1 } else { sut += n } }
+        }
+        sut
+    }
+    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict { Verdict::Pass }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) { write!(mut out, "counter diverged") }
+}
+
+#[test]
+fn machine_finds_and_shrinks() {
+    let report = check(|src: mut Source| run_steps(BuggyCounter {}, mut src, steps(30, 8)), Config::new(seed: 1, cases: 100))
+    assert!(report.failed())
+    // Shrunk to: more=1, Add flag=1, n=51 (choice 51), then end.
+    var src = Source::replay(report.shrunk, 4096)
+    let trace = run_traced(BuggyCounter {}, mut src, steps(30, 8))
+    assert!(trace.len() == 1)
+    assert!(trace.failed_step == 0)
+    assert!(trace.steps[0].command == "Add(51)")
+}

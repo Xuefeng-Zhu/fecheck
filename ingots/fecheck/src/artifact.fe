@@ -1,0 +1,352 @@
+// Portable regression artifacts (`.case` files).
+//
+// A case file records the *actual failing input*: the shrunk choice
+// sequence, plus the rendered operations and verdict it produced, so a
+// replay can check that the same commands are regenerated and that the same
+// failure happens. The seed is kept as provenance only; replay never needs
+// it.
+//
+// Format (schema 1): UTF-8 text, one `key value` pair per line, `#` starts a
+// comment line. Keys must appear in this order; `op` repeats.
+//
+//     fecheck-case 1
+//     test <name>
+//     target <implementation the failure was found against>
+//     compiler <compiler version>
+//     fecheck <library version>
+//     seed <u64>
+//     case <u64>
+//     cases <u64>
+//     verdict <pass|discard|fail|error> <code>
+//     failed-step <u64, or "none">
+//     original-length <u64>
+//     choices <u64> <u64> ...
+//     op <rendered command>        (zero or more)
+//     violation <one-line explanation>
+//     end
+//
+// The parser treats a case file as untrusted input: every line is length
+// checked, numbers must fit in a u64, the choice count is bounded, unknown
+// or out-of-order keys are rejected, and a truncated file (no `end`) is
+// rejected, so a damaged file can never replay as a pass.
+
+use core::{MemBuffer, MemSpan, MemVec}
+use core::text::parse_uint
+use super::verdict::{Verdict, kind_name, verdict_from_parts}
+
+pub const SCHEMA_VERSION: u64 = 1
+pub const FECHECK_VERSION: String<5> = "0.1.0"
+pub const MAX_CASE_CHOICES: usize = 4096
+pub const MAX_CASE_OPS: usize = 4096
+pub const MAX_LINE: usize = 65536
+pub const MAX_FILE: usize = 4194304
+
+/// A parsed (or to-be-written) regression case.
+pub struct Case {
+    pub schema: u64,
+    pub test: MemBuffer,
+    pub target: MemBuffer,
+    pub compiler: MemBuffer,
+    pub seed: u64,
+    pub case_index: u64,
+    pub cases: u64,
+    pub verdict: Verdict,
+    pub failed_step: u64,
+    pub has_failed_step: bool,
+    pub original_length: u64,
+    pub choices: MemVec<u64>,
+    pub ops: MemVec<MemBuffer>,
+    pub violation: MemBuffer,
+}
+
+/// Why a case file was rejected.
+pub enum ParseError {
+    TooLarge,
+    LineTooLong { line: u64 },
+    MissingHeader,
+    UnsupportedSchema { found: u64 },
+    UnexpectedKey { line: u64 },
+    MissingKey { line: u64 },
+    BadNumber { line: u64 },
+    BadVerdict { line: u64 },
+    TooManyChoices,
+    TooManyOps,
+    Truncated,
+    TrailingData { line: u64 },
+}
+
+impl ParseError {
+    /// A one-line, human-readable reason.
+    pub fn describe(self, _ out: mut MemBuffer) {
+        match self {
+            ParseError::TooLarge => write!(mut out, "file is larger than ", MAX_FILE, " bytes"),
+            ParseError::LineTooLong { line } => write!(mut out, "line ", line, " is too long"),
+            ParseError::MissingHeader => write!(mut out, "not a FeCheck case file (missing `fecheck-case` header)"),
+            ParseError::UnsupportedSchema { found } => write!(mut out, "unsupported schema version ", found, " (this FeCheck reads version ", SCHEMA_VERSION, ")"),
+            ParseError::UnexpectedKey { line } => write!(mut out, "unexpected or out-of-order key on line ", line),
+            ParseError::MissingKey { line } => write!(mut out, "required key missing at line ", line),
+            ParseError::BadNumber { line } => write!(mut out, "invalid number on line ", line),
+            ParseError::BadVerdict { line } => write!(mut out, "invalid verdict on line ", line),
+            ParseError::TooManyChoices => write!(mut out, "more than ", MAX_CASE_CHOICES, " choices"),
+            ParseError::TooManyOps => write!(mut out, "more than ", MAX_CASE_OPS, " operations"),
+            ParseError::Truncated => write!(mut out, "file is truncated (no `end` line)"),
+            ParseError::TrailingData { line } => write!(mut out, "unexpected data after `end` on line ", line),
+        }
+    }
+}
+
+impl Copy for ParseError {}
+
+/// Renders `case` in the schema-1 text format.
+pub fn encode(_ case: Case) -> MemBuffer {
+    var out = MemBuffer::new(0)
+    writeln!(mut out, "# FeCheck regression case. Replay with: fecheck replay <this file>")
+    writeln!(mut out, "fecheck-case ", SCHEMA_VERSION)
+    writeln!(mut out, "test ", case.test)
+    writeln!(mut out, "target ", case.target)
+    writeln!(mut out, "compiler ", case.compiler)
+    writeln!(mut out, "fecheck ", FECHECK_VERSION)
+    writeln!(mut out, "seed ", case.seed)
+    writeln!(mut out, "case ", case.case_index)
+    writeln!(mut out, "cases ", case.cases)
+    writeln!(mut out, "verdict ", kind_name(case.verdict.kind()), " ", case.verdict.code())
+    if case.has_failed_step {
+        writeln!(mut out, "failed-step ", case.failed_step)
+    } else {
+        writeln!(mut out, "failed-step none")
+    }
+    writeln!(mut out, "original-length ", case.original_length)
+    write!(mut out, "choices")
+    for c in case.choices {
+        write!(mut out, " ", c)
+    }
+    writeln!(mut out)
+    for ref op in case.ops {
+        writeln!(mut out, "op ", op)
+    }
+    writeln!(mut out, "violation ", case.violation)
+    writeln!(mut out, "end")
+    out
+}
+
+/// The keys of the format, in order. `op` (index 12) may repeat.
+fn expected_key(_ index: u64) -> String<15> {
+    if index == 0 { "fecheck-case" }
+    else if index == 1 { "test" }
+    else if index == 2 { "target" }
+    else if index == 3 { "compiler" }
+    else if index == 4 { "fecheck" }
+    else if index == 5 { "seed" }
+    else if index == 6 { "case" }
+    else if index == 7 { "cases" }
+    else if index == 8 { "verdict" }
+    else if index == 9 { "failed-step" }
+    else if index == 10 { "original-length" }
+    else if index == 11 { "choices" }
+    else if index == 12 { "op" }
+    else if index == 13 { "violation" }
+    else { "end" }
+}
+
+/// Parses a decimal u64; `None` on anything else, including overflow.
+pub fn parse_u64(_ text: MemSpan) -> Option<u64> {
+    if text.len() == 0 || text.len() > 20 {
+        return Option::None
+    }
+    for b in text {
+        if b < b'0' || b > b'9' {
+            return Option::None
+        }
+    }
+    match parse_uint(text) {
+        Option::Some(v) => {
+            if v > 0xFFFFFFFFFFFFFFFF {
+                Option::None
+            } else {
+                Option::Some(v.downcast_saturate())
+            }
+        }
+        Option::None => Option::None,
+    }
+}
+
+fn verdict_kind(_ name: MemSpan) -> Option<u64> {
+    if name == "pass" {
+        Option::Some(0)
+    } else if name == "discard" {
+        Option::Some(1)
+    } else if name == "fail" {
+        Option::Some(2)
+    } else if name == "error" {
+        Option::Some(3)
+    } else {
+        Option::None
+    }
+}
+
+fn empty_case() -> Case {
+    Case {
+        schema: 0,
+        test: MemBuffer::new(0),
+        target: MemBuffer::new(0),
+        compiler: MemBuffer::new(0),
+        seed: 0,
+        case_index: 0,
+        cases: 0,
+        verdict: Verdict::Error { code: 0 },
+        failed_step: 0,
+        has_failed_step: false,
+        original_length: 0,
+        choices: MemVec::new(),
+        ops: MemVec::new(),
+        violation: MemBuffer::new(0),
+    }
+}
+
+/// Parses a case file. Never panics on malformed input.
+pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
+    if text.len() > MAX_FILE {
+        return Result::Err(ParseError::TooLarge)
+    }
+    var case = empty_case()
+    var key_index: u64 = 0
+    var line_no: u64 = 0
+    var ended = false
+    for line in text.lines() {
+        line_no += 1
+        if line.len() > MAX_LINE {
+            return Result::Err(ParseError::LineTooLong { line: line_no })
+        }
+        let trimmed = line.trim()
+        if trimmed.len() == 0 || trimmed.starts_with(b'#') {
+            continue
+        }
+        if ended {
+            return Result::Err(ParseError::TrailingData { line: line_no })
+        }
+        // Split into `key` and the rest of the line.
+        var key_len = trimmed.len()
+        var rest_start = trimmed.len()
+        match trimmed.index_of(b' ') {
+            Option::Some(i) => {
+                key_len = i
+                rest_start = i + 1
+            }
+            Option::None => {}
+        }
+        let key = trimmed.slice(offset: 0, len: key_len)
+        let rest = trimmed.slice(offset: rest_start, len: trimmed.len() - rest_start)
+
+        // Repeated `op` lines stay at index 12; anything else advances.
+        if key_index == 13 && key == "op" {
+            key_index = 12
+        }
+        if key_index > 14 {
+            return Result::Err(ParseError::TrailingData { line: line_no })
+        }
+        // `op` lines are optional: allow skipping straight to `violation`.
+        if key_index == 12 && key == "violation" {
+            key_index = 13
+        }
+        if key != expected_key(key_index) {
+            if key_index == 0 {
+                return Result::Err(ParseError::MissingHeader)
+            }
+            return Result::Err(ParseError::UnexpectedKey { line: line_no })
+        }
+
+        if key_index == 0 {
+            match parse_u64(rest) {
+                Option::Some(v) => {
+                    if v != SCHEMA_VERSION {
+                        return Result::Err(ParseError::UnsupportedSchema { found: v })
+                    }
+                    case.schema = v
+                }
+                Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+            }
+        } else if key_index == 1 {
+            if rest.len() == 0 {
+                return Result::Err(ParseError::MissingKey { line: line_no })
+            }
+            case.test = format!(rest)
+        } else if key_index == 2 {
+            case.target = format!(rest)
+        } else if key_index == 3 {
+            case.compiler = format!(rest)
+        } else if key_index == 4 {
+            // Library version: informational.
+        } else if key_index == 5 || key_index == 6 || key_index == 7 || key_index == 10 {
+            match parse_u64(rest) {
+                Option::Some(v) => {
+                    if key_index == 5 { case.seed = v }
+                    else if key_index == 6 { case.case_index = v }
+                    else if key_index == 7 { case.cases = v }
+                    else { case.original_length = v }
+                }
+                Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+            }
+        } else if key_index == 8 {
+            match rest.index_of(b' ') {
+                Option::Some(i) => {
+                    let name = rest.slice(offset: 0, len: i)
+                    let code_text = rest.slice(offset: i + 1, len: rest.len() - i - 1)
+                    let kind = match verdict_kind(name) {
+                        Option::Some(k) => k,
+                        Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+                    }
+                    let code = match parse_u64(code_text) {
+                        Option::Some(c) => c,
+                        Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+                    }
+                    case.verdict = verdict_from_parts(kind, code)
+                }
+                Option::None => return Result::Err(ParseError::BadVerdict { line: line_no }),
+            }
+        } else if key_index == 9 {
+            if rest == "none" {
+                case.has_failed_step = false
+            } else {
+                match parse_u64(rest) {
+                    Option::Some(v) => {
+                        case.failed_step = v
+                        case.has_failed_step = true
+                    }
+                    Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                }
+            }
+        } else if key_index == 11 {
+            if rest.len() > 0 {
+                for field in rest.split(b' ') {
+                    if field.len() == 0 {
+                        continue
+                    }
+                    if case.choices.len() >= MAX_CASE_CHOICES {
+                        return Result::Err(ParseError::TooManyChoices)
+                    }
+                    match parse_u64(field) {
+                        Option::Some(v) => case.choices.push(v),
+                        Option::None => return Result::Err(ParseError::BadNumber { line: line_no }),
+                    }
+                }
+            }
+        } else if key_index == 12 {
+            if case.ops.len() >= MAX_CASE_OPS {
+                return Result::Err(ParseError::TooManyOps)
+            }
+            case.ops.push(format!(rest))
+        } else if key_index == 13 {
+            case.violation = format!(rest)
+        } else if key_index == 14 {
+            ended = true
+        }
+        key_index += 1
+    }
+    if !ended {
+        if key_index == 0 {
+            return Result::Err(ParseError::MissingHeader)
+        }
+        return Result::Err(ParseError::Truncated)
+    }
+    Result::Ok(case)
+}

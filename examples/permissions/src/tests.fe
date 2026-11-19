@@ -1,0 +1,49 @@
+use fecheck::{copy_choices, Source, Config, check, steps, run_steps, run_traced, encode, decode, machine_case, replay_machine, ReplayOutcome}
+use super::machine::{against_cached, against_fixed, REVOKED_AGENT_EXECUTED}
+
+#[test]
+fn finds_stale_cache_bug() {
+    let report = check(|src: mut Source| run_steps(against_cached(), mut src, steps(40, 12)), Config::new(seed: 12345, cases: 500))
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == REVOKED_AGENT_EXECUTED)
+
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(against_cached(), mut src, steps(40, 12))
+    // Grant, Execute (warms the cache), Revoke, Execute: all on one agent.
+    assert!(trace.len() == 4)
+    assert!(trace.steps[0].command.span().starts_with("Grant(agent="))
+    assert!(trace.steps[1].command.span().starts_with("Execute(agent="))
+    assert!(trace.steps[2].command.span().starts_with("Revoke(agent="))
+    assert!(trace.steps[3].command.span().starts_with("Execute(agent="))
+    assert!(trace.steps[3].expected == "denied")
+    assert!(trace.steps[3].actual == "allowed")
+    assert!(trace.failed_step == 3)
+}
+
+#[test]
+fn fixed_system_passes() {
+    let report = check(|src: mut Source| run_steps(against_fixed(), mut src, steps(40, 12)), Config::new(seed: 12345, cases: 500))
+    assert!(report.passed())
+}
+
+#[test]
+fn case_round_trip_and_replay() {
+    let report = check(|src: mut Source| run_steps(against_cached(), mut src, steps(40, 12)), Config::new(seed: 99, cases: 500))
+    assert!(report.failed())
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(against_cached(), mut src, steps(40, 12))
+    let case = machine_case(test: format!("revoked_agent_cannot_execute"), target: format!("cached"), compiler: format!("fe 26.6.0"), seed: 99, case_index: report.failing_case, cases: 500, original_length: 0, report.shrunk, trace)
+    let text = encode(case)
+    let parsed = match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => panic(),
+    }
+    let (outcome, _) = replay_machine(against_cached(), steps(40, 12), parsed)
+    assert!(outcome.is_reproduced())
+    let parsed2 = match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => panic(),
+    }
+    let (fixed_outcome, _) = replay_machine(against_fixed(), steps(40, 12), parsed2)
+    assert!(fixed_outcome.kind() == 1)
+}

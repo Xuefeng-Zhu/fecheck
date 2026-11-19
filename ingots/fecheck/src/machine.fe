@@ -1,0 +1,192 @@
+// State-machine testing.
+//
+// A state-machine test drives a system under test (SUT) with a generated
+// sequence of commands and checks it against a simple reference model:
+//
+// * After every command, `invariant(model, sut)` must hold.
+// * After every command, the SUT's observable result must equal the
+//   model's (the postcondition). A violated invariant is reported in
+//   preference to a mismatch, because it names the broken property.
+//
+// Every run starts from `new_model()` and `new_sut()`, so each generated
+// case, each shrink candidate and each replay begins from the same clean
+// state. Commands are generated from the current model state, so a test can
+// generate mostly valid commands; `precondition` filters the rest, and a
+// command whose precondition fails is skipped (and recorded as skipped) on
+// both sides, consistently in generation, shrinking and replay.
+//
+// The command list is encoded like `VecOf`: a "more" flag before each
+// command. Deleting a command's choices removes exactly that command, and
+// lowering a flag to 0 truncates the sequence there.
+
+use core::{MemBuffer, MemVec}
+use core::ops::Eq
+use std::io::Display
+use super::source::Source
+use super::verdict::Verdict
+
+/// Failure code for a command whose SUT result differs from the model's.
+pub const POSTCONDITION_MISMATCH: u64 = 0xFFFF0001
+
+/// No step failed.
+pub const NO_STEP: u64 = 0xFFFFFFFFFFFFFFFF
+
+/// A system under test and the model it is checked against.
+pub trait StateMachine {
+    /// One operation, such as `Grant(agent=1)`. Display is used in traces.
+    type Cmd: Copy + Display
+    /// The observable result of applying a command.
+    type Obs: Copy + Eq + Display
+    /// The reference model's state.
+    type Model
+    /// The system under test's state.
+    type Sut
+
+    fn new_model(self) -> Self::Model
+    fn new_sut(self) -> Self::Sut
+
+    /// Draws the next command; may consult the model to prefer valid ones.
+    fn gen_cmd(self, _ src: mut Source, _ model: Self::Model) -> Self::Cmd
+
+    /// Whether `cmd` may run in `model`'s state. Rejected commands are skipped.
+    fn precondition(self, _ model: Self::Model, _ cmd: Self::Cmd) -> bool
+
+    /// Applies `cmd` to the model and returns the expected observation.
+    fn run_model(self, _ model: mut Self::Model, _ cmd: Self::Cmd) -> Self::Obs
+
+    /// Applies `cmd` to the SUT and returns the actual observation.
+    fn run_sut(self, _ sut: mut Self::Sut, _ cmd: Self::Cmd) -> Self::Obs
+
+    /// Checked after every executed command. Return `Fail { code }` with a
+    /// code that `describe_failure` can explain.
+    fn invariant(self, _ model: Self::Model, _ sut: Self::Sut) -> Verdict
+
+    /// Writes a one-line explanation of failure `code` to `out`.
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer)
+}
+
+/// Sequence-length settings for a state-machine test.
+pub struct Steps {
+    /// The longest command sequence generated.
+    pub max: u64,
+    /// The mean length in random mode (before `max` cuts it off).
+    pub mean: u64,
+}
+
+impl Copy for Steps {}
+
+pub fn steps(_ max: u64, _ mean: u64) -> Steps {
+    Steps { max, mean }
+}
+
+/// One executed (or skipped) command of a recorded run.
+pub struct Step {
+    pub index: u64,
+    pub command: MemBuffer,
+    pub skipped: bool,
+    pub expected: MemBuffer,
+    pub actual: MemBuffer,
+    pub verdict: Verdict,
+}
+
+/// A full record of one state-machine run, for reports and artifacts.
+pub struct Trace {
+    pub steps: MemVec<Step>,
+    pub verdict: Verdict,
+    /// Index of the step that failed, or `NO_STEP`.
+    pub failed_step: u64,
+    /// Commands executed (not skipped).
+    pub executed: u64,
+    pub skipped: u64,
+    /// Explanation of the failure, if any.
+    pub explanation: MemBuffer,
+}
+
+impl Trace {
+    pub fn new() -> Self {
+        Trace {
+            steps: MemVec::new(),
+            verdict: Verdict::Pass,
+            failed_step: NO_STEP,
+            executed: 0,
+            skipped: 0,
+            explanation: MemBuffer::new(0),
+        }
+    }
+
+    /// Number of commands in the sequence, including skipped ones.
+    pub fn len(self) -> u64 {
+        self.steps.len().downcast_saturate()
+    }
+}
+
+/// Runs one command sequence drawn from `src`. Returns the verdict.
+pub fn run_steps<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps) -> Verdict {
+    var trace = Trace::new()
+    execute(machine, mut src, steps, mut trace, false)
+}
+
+/// Runs one command sequence drawn from `src` and records every step.
+pub fn run_traced<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps) -> Trace {
+    var trace = Trace::new()
+    let _ = execute(machine, mut src, steps, mut trace, true)
+    trace
+}
+
+fn execute<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps, _ trace: mut Trace, _ record: bool) -> Verdict {
+    var model = machine.new_model()
+    var sut = machine.new_sut()
+    var index: u64 = 0
+    var verdict = Verdict::Pass
+    while index < steps.max {
+        if !src.draw_weighted(steps.mean, steps.mean + 1) {
+            break
+        }
+        let cmd = machine.gen_cmd(mut src, model)
+        if !machine.precondition(model, cmd) {
+            trace.skipped += 1
+            if record {
+                trace.steps.push(Step {
+                    index,
+                    command: format!(cmd),
+                    skipped: true,
+                    expected: MemBuffer::new(0),
+                    actual: MemBuffer::new(0),
+                    verdict: Verdict::Pass,
+                })
+            }
+            index += 1
+            continue
+        }
+        let expected = machine.run_model(mut model, cmd)
+        let actual = machine.run_sut(mut sut, cmd)
+        trace.executed += 1
+        // The invariant is checked first because it names the property that
+        // broke; a bare result mismatch is reported only when it holds.
+        var step_verdict = machine.invariant(model, sut)
+        if step_verdict.is_pass() && expected != actual {
+            step_verdict = Verdict::Fail { code: POSTCONDITION_MISMATCH }
+        }
+        if record {
+            trace.steps.push(Step {
+                index,
+                command: format!(cmd),
+                skipped: false,
+                expected: format!(expected),
+                actual: format!(actual),
+                verdict: step_verdict,
+            })
+        }
+        if !step_verdict.is_pass() {
+            verdict = step_verdict
+            trace.failed_step = index
+            if record {
+                machine.describe_failure(step_verdict.code(), mut trace.explanation)
+            }
+            break
+        }
+        index += 1
+    }
+    trace.verdict = verdict
+    verdict
+}

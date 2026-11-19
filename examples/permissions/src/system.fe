@@ -1,0 +1,104 @@
+// An agent permission system with a decision cache.
+//
+// Authorising an action is "expensive" (imagine a policy engine or a
+// signature check), so the system remembers the last decision it made.
+// Two implementations share the `PermissionApi` interface:
+//
+// * `CachedPermissions` has a realistic defect: `revoke` clears the grant
+//   but forgets to invalidate the cached decision, so an agent that executed
+//   just before being revoked can keep executing.
+// * `FixedPermissions` invalidates the cache on every revoke.
+//
+// Neither the test nor FeCheck is told which sequence triggers the bug.
+
+pub const AGENTS: u64 = 4
+
+pub trait PermissionApi {
+    fn grant(mut self, _ agent: u64)
+    fn revoke(mut self, _ agent: u64)
+    /// Whether `agent` may execute right now.
+    fn execute(mut self, _ agent: u64) -> bool
+}
+
+pub struct CachedPermissions {
+    granted: [bool; 4],
+    cache_valid: bool,
+    cache_agent: u64,
+    cache_allowed: bool,
+}
+
+impl Copy for CachedPermissions {}
+
+impl CachedPermissions {
+    pub fn new() -> Self {
+        CachedPermissions { granted: [false; 4], cache_valid: false, cache_agent: 0, cache_allowed: false }
+    }
+}
+
+impl PermissionApi for CachedPermissions {
+    fn grant(mut self, _ agent: u64) {
+        self.granted[idx(agent)] = true
+        // A new grant can only widen access, so the cache is refreshed.
+        self.cache_valid = false
+    }
+
+    fn revoke(mut self, _ agent: u64) {
+        self.granted[idx(agent)] = false
+        // BUG: the cached decision for `agent` is left in place.
+    }
+
+    fn execute(mut self, _ agent: u64) -> bool {
+        if self.cache_valid && self.cache_agent == agent {
+            return self.cache_allowed
+        }
+        let allowed = self.granted[idx(agent)]
+        self.cache_valid = true
+        self.cache_agent = agent
+        self.cache_allowed = allowed
+        allowed
+    }
+}
+
+pub struct FixedPermissions {
+    granted: [bool; 4],
+    cache_valid: bool,
+    cache_agent: u64,
+    cache_allowed: bool,
+}
+
+impl Copy for FixedPermissions {}
+
+impl FixedPermissions {
+    pub fn new() -> Self {
+        FixedPermissions { granted: [false; 4], cache_valid: false, cache_agent: 0, cache_allowed: false }
+    }
+}
+
+impl PermissionApi for FixedPermissions {
+    fn grant(mut self, _ agent: u64) {
+        self.granted[idx(agent)] = true
+        self.cache_valid = false
+    }
+
+    fn revoke(mut self, _ agent: u64) {
+        self.granted[idx(agent)] = false
+        // FIX: a revoke invalidates the cached decision.
+        self.cache_valid = false
+    }
+
+    fn execute(mut self, _ agent: u64) -> bool {
+        if self.cache_valid && self.cache_agent == agent {
+            return self.cache_allowed
+        }
+        let allowed = self.granted[idx(agent)]
+        self.cache_valid = true
+        self.cache_agent = agent
+        self.cache_allowed = allowed
+        allowed
+    }
+}
+
+/// An agent id as an array index. Agents are always below `AGENTS`.
+pub fn idx(_ agent: u64) -> usize {
+    agent.downcast_saturate()
+}

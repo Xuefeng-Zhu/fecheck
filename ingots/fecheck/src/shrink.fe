@@ -8,8 +8,9 @@
 // Passes, repeated until a full round makes no progress or the evaluation
 // budget runs out:
 //
-// 1. Delete runs of 8, 4, 2 and 1 consecutive choices. For lists and command
-//    sequences this removes whole elements or commands.
+// 1. Delete runs of 8, 7, ..., 1 consecutive choices. For lists and command
+//    sequences this removes whole elements or commands, whatever number of
+//    choices one element takes.
 // 2. Lower each choice: try 0, then binary-search the smallest value that
 //    still fails. For numbers this shrinks magnitudes; for commands it
 //    switches to simpler command kinds and smaller arguments.
@@ -128,7 +129,7 @@ fn delete_runs<F: Fn(mut Source) -> Verdict>(_ test: F, _ s: mut Shrinker) -> bo
                 start += 1
             }
         }
-        size = size / 2
+        size -= 1
     }
     improved
 }
