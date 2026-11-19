@@ -30,11 +30,17 @@ if [ "${SKIP_NATIVE:-0}" = "1" ]; then
     exit 0
 fi
 
-echo "== fe test --backend native"
-for ingot in ingots/fecheck examples/permissions examples/queue; do
-    echo "-- $ingot"
-    "$FE" test --backend native "$ingot"
-done
+# SKIP_NATIVE_TESTS=1 still builds and checks the CLI, for hosts that run an
+# x86-64 Fe under qemu-user without binfmt (fe test cannot exec the test binary).
+if [ "${SKIP_NATIVE_TESTS:-0}" = "1" ]; then
+    echo "== skipping fe test --backend native (SKIP_NATIVE_TESTS=1)"
+else
+    echo "== fe test --backend native"
+    for ingot in ingots/fecheck examples/permissions examples/queue; do
+        echo "-- $ingot"
+        "$FE" test --backend native "$ingot"
+    done
+fi
 
 echo "== build CLI"
 ./scripts/build.sh
