@@ -427,3 +427,35 @@ fn shrinking_is_deterministic() {
     assert!(same_choices(first.shrunk, second.shrunk))
     assert!(first.shrink.attempts == second.shrink.attempts)
 }
+
+// ---------------------------------------------------------------- README example
+
+fn sum_forward(_ xs: MemVec<u64>) -> u64 {
+    var total: u64 = 0
+    for x in xs {
+        total += x
+    }
+    total
+}
+
+fn sum_backward(_ xs: MemVec<u64>) -> u64 {
+    var total: u64 = 0
+    var i = xs.len()
+    while i > 0 {
+        i -= 1
+        total += xs[i]
+    }
+    total
+}
+
+#[test]
+fn sum_is_order_independent() {
+    let report = check(
+        |src: mut Source| {
+            let xs = vec_of(uint_in(0, 1000), max_len: 20).generate(mut src)
+            ensure(sum_forward(xs) == sum_backward(xs), 1)
+        },
+        Config::new(seed: 1, cases: 500),
+    )
+    assert!(report.passed())
+}

@@ -1,0 +1,123 @@
+=== 1. Search: permissions system with a decision cache ===
+
+FeCheck - Property Testing for Fe
+Test:    revoked_agent_cannot_execute
+Target:  permissions
+Seed:    12345
+Cases:   1000 (up to 40 operations each)
+
+Property failed on case 45 of 1000.
+Original: 7 operations (21 choices)
+Shrunk:   4 operations (12 choices) after 217 candidates, 2 accepted
+Counterexample:
+  1. Grant(agent=2)   -> ok
+  2. Execute(agent=2)   -> allowed
+  3. Revoke(agent=2)   -> ok
+  4. Execute(agent=2)   -> expected denied, got allowed   <-- violation
+Violation:
+  revoked_agent_cannot_execute: an agent without a current grant was allowed to execute
+Replay artifact:
+  /tmp/demo/permissions.case
+Reproduce with:
+  fecheck replay /tmp/demo/permissions.case
+Trace JSON: /tmp/demo/permissions.json
+Regression test (paste into a test module):
+  #[test]
+  fn regression_revoked_agent_cannot_execute() {
+      let choices = fecheck::choices_from([1, 0, 2, 1, 2, 2, 1, 1, 2, 1, 2, 2])
+      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)
+      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())
+  }
+
+=== 2. Replay the saved case against the same (buggy) system ===
+
+FeCheck - Property Testing for Fe
+Case:    /tmp/demo/permissions.case
+Test:    revoked_agent_cannot_execute
+Found against: permissions (fe 26.6.0, seed 12345, case 45)
+Replaying against: permissions
+
+Replayed:
+  1. Grant(agent=2)   -> ok
+  2. Execute(agent=2)   -> allowed
+  3. Revoke(agent=2)   -> ok
+  4. Execute(agent=2)   -> expected denied, got allowed   <-- violation
+Violation:
+  revoked_agent_cannot_execute: an agent without a current grant was allowed to execute
+
+REPRODUCED: the recorded failure happened again at operation 4.
+
+=== 3. Replay the same case against the fixed system ===
+
+FeCheck - Property Testing for Fe
+Case:    /tmp/demo/permissions.case
+Test:    revoked_agent_cannot_execute
+Found against: permissions (fe 26.6.0, seed 12345, case 45)
+Replaying against: permissions-fixed
+
+Replayed:
+  1. Grant(agent=2)   -> ok
+  2. Execute(agent=2)   -> allowed
+  3. Revoke(agent=2)   -> ok
+  4. Execute(agent=2)   -> denied
+
+NOT REPRODUCED: all 4 recorded operations now pass. The regression is fixed.
+
+=== 4. Search: bounded ring-buffer queue ===
+
+FeCheck - Property Testing for Fe
+Test:    bounded_queue_matches_model
+Target:  queue
+Seed:    12345
+Cases:   1000 (up to 40 operations each)
+
+Property failed on case 4 of 1000.
+Original: 20 operations (45 choices)
+Shrunk:   8 operations (20 choices) after 358 candidates, 9 accepted
+Counterexample:
+  1. Push(0)   -> pushed
+  2. Pop   -> Some(0)
+  3. Push(0)   -> pushed
+  4. Pop   -> Some(0)
+  5. Push(0)   -> pushed
+  6. Pop   -> Some(0)
+  7. Push(1)   -> pushed
+  8. Pop   -> expected Some(1), got Some(0)   <-- violation
+Violation:
+  fifo_order/respects_capacity: the queue's result differs from the model's
+Replay artifact:
+  /tmp/demo/queue.case
+Reproduce with:
+  fecheck replay /tmp/demo/queue.case
+Trace JSON: /tmp/demo/queue.json
+Regression test (paste into a test module):
+  #[test]
+  fn regression_bounded_queue_matches_model() {
+      let choices = fecheck::choices_from([1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1])
+      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)
+      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())
+  }
+
+=== 5. Replay the queue case against the fixed queue ===
+
+FeCheck - Property Testing for Fe
+Case:    /tmp/demo/queue.case
+Test:    bounded_queue_matches_model
+Found against: queue (fe 26.6.0, seed 12345, case 4)
+Replaying against: queue-fixed
+
+Replayed:
+  1. Push(0)   -> pushed
+  2. Pop   -> Some(0)
+  3. Push(0)   -> pushed
+  4. Pop   -> Some(0)
+  5. Push(0)   -> pushed
+  6. Pop   -> Some(0)
+  7. Push(1)   -> pushed
+  8. Pop   -> Some(1)
+
+NOT REPRODUCED: all 8 recorded operations now pass. The regression is fixed.
+
+=== Summary ===
+  permissions: bug found, shrunk, replayed, and gone in the fixed system: yes
+  queue:       bug found, shrunk, and gone in the fixed queue:            yes

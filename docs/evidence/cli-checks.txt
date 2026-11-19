@@ -1,0 +1,26 @@
+ok   [0] list
+ok   [2] no arguments is a usage error
+ok   [2] unknown command
+ok   [2] unknown test
+ok   [2] bad --seed
+ok   [2] --cases 0 is an invalid config
+ok   [1] buggy permissions fail
+ok   [0] fixed permissions pass
+ok   [1] buggy queue fails
+ok   [0] fixed queue passes
+ok   [0] replay reproduces
+ok   [3] replay against fix does not
+ok   [0] queue replay reproduces
+ok   [3] queue replay against fix
+ok   [4] replay against wrong family
+ok   [4] missing file
+ok   same seed -> identical report and case file
+ok   [4] truncated case file
+ok   [4] unsupported schema version
+ok   [4] non-numeric choice
+ok   [4] edited op line is reported as drift
+ok   [4] unknown test identifier
+ok   [4] garbage file
+ok   trace JSON parses
+ok   [0] scripted demo
+all CLI checks passed
