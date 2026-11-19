@@ -1,0 +1,59 @@
+// FeCheck from a separate ingot. Everything below is public API.
+use fecheck::{Source, Config, Gen, Verdict, check, ensure, uint_in, choices_from, run_choices}
+use ingot::{add_capped, add_capped_buggy}
+
+const CAP: u64 = 1000
+const OVER_CAP: u64 = 1
+
+/// The property: the result never exceeds the cap, and equals the plain sum
+/// whenever that fits.
+fn capped_property(_ src: mut Source, buggy: bool) -> Verdict {
+    let value = uint_in(0, CAP).generate(mut src)
+    let n = uint_in(0, 100000).generate(mut src)
+    let got = if buggy {
+        add_capped_buggy(value, n, CAP)
+    } else {
+        add_capped(value, n, CAP)
+    }
+    let want = if value + n > CAP { CAP } else { value + n }
+    ensure(got == want, OVER_CAP)
+}
+
+#[test]
+fn add_capped_never_exceeds_the_cap() {
+    let report = check(
+        |src: mut Source| capped_property(mut src, buggy: false),
+        Config::new(seed: 1, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+#[test]
+fn fecheck_finds_and_shrinks_the_buggy_version() {
+    let report = check(
+        |src: mut Source| capped_property(mut src, buggy: true),
+        Config::new(seed: 1, cases: 1000),
+    )
+    assert!(report.failed())
+    // The shrinker reduces any failing input to the smallest one:
+    // value 0, n = CAP + 256.
+    assert!(report.shrunk[0] == 0 && report.shrunk[1] == CAP + 256)
+}
+
+// The shrunk failure, checked in as a regression test: it fails on the
+// buggy version and passes on the fixed one.
+#[test]
+fn regression_add_capped_wraps() {
+    let buggy = run_choices(
+        |src: mut Source| capped_property(mut src, buggy: true),
+        choices_from([0, 1256]),
+        4096,
+    )
+    assert!(buggy.0.is_failure())
+    let fixed = run_choices(
+        |src: mut Source| capped_property(mut src, buggy: false),
+        choices_from([0, 1256]),
+        4096,
+    )
+    assert!(fixed.0.is_pass())
+}

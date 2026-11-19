@@ -1,0 +1,19 @@
+// The code under test: a tiny saturating counter and a sum.
+
+/// Adds `n` to `value`, stopping at `cap`.
+pub fn add_capped(_ value: u64, _ n: u64, _ cap: u64) -> u64 {
+    if n >= cap || value >= cap - n {
+        cap
+    } else {
+        value + n
+    }
+}
+
+/// The same, written with a bug: it wraps instead of saturating when
+/// `value + n` would pass `cap` by more than 255.
+pub fn add_capped_buggy(_ value: u64, _ n: u64, _ cap: u64) -> u64 {
+    let sum = value + n
+    if sum > cap + 255 {
+        sum - cap
+    } else if sum > cap { cap } else { sum }
+}

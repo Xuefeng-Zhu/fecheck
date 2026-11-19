@@ -84,14 +84,12 @@ impl Source {
         value
     }
 
-    /// `true` with probability `numerator / denominator` in random mode.
-    /// Shrinks toward `false`.
+    /// `true` with probability `numerator / denominator` in random mode
+    /// (always `true` when `numerator >= denominator`, never when either is
+    /// 0). Records one choice, 1 for `true`, so it shrinks toward `false`.
     pub fn draw_weighted(mut self, _ numerator: u64, _ denominator: u64) -> bool {
         if numerator == 0 || denominator == 0 {
             return false
-        }
-        if numerator >= denominator {
-            return self.draw(1) == 1
         }
         if self.replaying {
             return self.draw(1) == 1
@@ -100,7 +98,8 @@ impl Source {
             self.overrun = true
             return false
         }
-        let hit = self.rng.up_to(denominator - 1) < numerator
+        // Probability 1 must not fall back to a fair coin.
+        let hit = numerator >= denominator || self.rng.up_to(denominator - 1) < numerator
         let value: u64 = if hit { 1 } else { 0 }
         self.recorded.push(value)
         hit
@@ -119,6 +118,11 @@ impl Source {
     /// How many choices have been drawn so far.
     pub fn len(self) -> usize {
         self.recorded.len()
+    }
+
+    /// How many recorded choices a replaying source has not read yet.
+    pub fn unread(self) -> usize {
+        self.prefix.len() - self.pos
     }
 
     /// Whether this source is replaying recorded choices.

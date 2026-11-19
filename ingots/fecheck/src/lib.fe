@@ -40,7 +40,17 @@ pub use machine::{
     run_traced,
     POSTCONDITION_MISMATCH,
     NO_STEP,
+    MAX_STEPS,
 }
-pub use artifact::{Case, ParseError, encode, decode, parse_u64, SCHEMA_VERSION, FECHECK_VERSION}
-pub use replay::{ReplayOutcome, replay_property, replay_machine, machine_case}
+pub use artifact::{
+    Case,
+    ParseError,
+    encode,
+    decode,
+    parse_u64,
+    SCHEMA_VERSION,
+    MIN_SCHEMA_VERSION,
+    FECHECK_VERSION,
+}
+pub use replay::{ReplayOutcome, replay_property, replay_machine, machine_case, case_steps}
 pub use json::{case_json, write_json_string}

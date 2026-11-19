@@ -5,9 +5,14 @@
 //   fecheck replay <file> [--against TARGET] [--json FILE]
 //   fecheck demo [--seed N] [--dir DIR]
 //
-// Exit status: 0 success (passed / failure reproduced as expected by
-// `replay`), 1 property failed, 2 usage or configuration error, 3 replay did
-// not reproduce, 4 malformed or incompatible case file.
+// Exit status:
+//   0  `run`: the property passed. `replay`: the recorded failure reproduced.
+//   1  `run`: the property failed (a case file was written).
+//   2  usage or configuration error.
+//   3  `replay`: every recorded operation now passes (the bug is fixed).
+//   4  `replay`: malformed or incompatible case file, invalid case, or drift.
+//   5  `replay`: the case still fails, but differently.
+// Only 3 means "fixed"; scripts must not treat any other non-zero as a pass.
 //
 // All testing logic lives in the `fecheck` ingot; this file only parses
 // arguments, prints, and reads or writes files. Those are the only
@@ -37,6 +42,7 @@ use fecheck::{
     parse_u64,
     machine_case,
     replay_machine,
+    case_steps,
     case_json,
     copy_choices,
     len64,
@@ -54,6 +60,7 @@ const EXIT_FAILED: i32 = 1
 const EXIT_USAGE: i32 = 2
 const EXIT_NOT_REPRODUCED: i32 = 3
 const EXIT_BAD_CASE: i32 = 4
+const EXIT_DIFFERENT_FAILURE: i32 = 5
 
 /// Command-line options shared by the subcommands.
 struct Options {
@@ -130,7 +137,10 @@ fn usage() uses (out: mut Stdout) {
     println!("  fecheck demo [--seed N] [--dir DIR]")
     println!()
     println!(
-        "exit status: 0 ok, 1 property failed, 2 usage error, 3 replay did not reproduce, 4 bad case file",
+        "exit status: 0 ok/reproduced, 1 property failed, 2 usage error, 3 replay passes (fixed),",
+    )
+    println!(
+        "             4 bad case file or drift, 5 replay failed differently",
     )
 }
 
@@ -230,6 +240,15 @@ fn run_named(_ name: MemSpan, _ opts: Options) -> i32
 uses (out: mut Stdout, fs: mut Fs)
 {
     let s = steps(opts.max_steps, 12)
+    if s.problem() != 0 {
+        println!(
+            "fecheck: --steps must be between 1 and ",
+            fecheck::MAX_STEPS,
+            ", got ",
+            opts.max_steps,
+        )
+        return EXIT_USAGE
+    }
     if name == "permissions" {
         return run_machine(against_cached(), s, format!(name), opts)
     }
@@ -356,6 +375,7 @@ uses (out: mut Stdout, fs: mut Fs)
         seed: opts.seed,
         case_index: report.failing_case,
         cases: opts.cases,
+        steps: s,
         original_length: original.len(),
         report.shrunk,
         trace,
@@ -380,7 +400,7 @@ uses (out: mut Stdout, fs: mut Fs)
     if opts.json.len() > 0 {
         write_json(opts.json.span(), case, trace)
     }
-    print_snippet(case)
+    print_snippet(case, s)
     EXIT_FAILED
 }
 
@@ -433,11 +453,41 @@ fn print_trace(_ heading: String<16>, _ trace: Trace) uses (out: mut Stdout) {
     }
 }
 
-/// Prints a regression test the user can paste into their own `fe test` suite.
-fn print_snippet(_ case: Case) uses (out: mut Stdout) {
-    println!("Regression test (paste into a test module):")
+/// The fixed and buggy implementations of a bundled target's test family,
+/// as Fe expressions.
+fn fixed_expr(_ target: MemSpan) -> MemBuffer {
+    if target.starts_with("permissions") {
+        format!("permissions::against_fixed()")
+    } else {
+        format!("queue::against_mod()")
+    }
+}
+
+fn buggy_expr(_ target: MemSpan) -> MemBuffer {
+    if target.starts_with("permissions") {
+        format!("permissions::against_cached()")
+    } else {
+        format!("queue::against_masked()")
+    }
+}
+
+/// Prints a compilable regression test for the bundled target. It passes
+/// against the fixed implementation and fails against the buggy one;
+/// `scripts/cli-checks.sh` compiles and runs it both ways.
+fn print_snippet(_ case: Case, _ s: Steps) uses (out: mut Stdout) {
+    let target = case.target.span()
+    let family = if target.starts_with("permissions") {
+        format!("permissions")
+    } else {
+        format!("queue")
+    }
+    println!(
+        "Regression test (add to a test module of an ingot that depends on fecheck and ",
+        family,
+        "):",
+    )
     println!("  #[test]")
-    println!("  fn regression_", case.test, "() {")
+    println!("  fn regression_", case.test, "_seed_", case.seed, "() {")
     print!("      let choices = fecheck::choices_from([")
     var first = true
     for c in case.choices {
@@ -450,8 +500,20 @@ fn print_snippet(_ case: Case) uses (out: mut Stdout) {
         "      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)",
     )
     println!(
-        "      assert!(fecheck::run_steps(<your machine>, mut src, fecheck::steps(40, 12)).is_pass())",
+        "      // Passes on the fixed implementation; the same choices fail on ",
+        buggy_expr(target),
+        ".",
     )
+    println!(
+        "      let verdict = fecheck::run_steps(",
+        fixed_expr(target),
+        ", mut src, fecheck::steps(",
+        s.max,
+        ", ",
+        s.mean,
+        "))",
+    )
+    println!("      assert!(verdict.is_pass())")
     println!("  }")
 }
 
@@ -525,7 +587,23 @@ uses (out: mut Stdout, fs: mut Fs)
         )
         return EXIT_BAD_CASE
     }
-    let s = steps(40, 12)
+    // Replay with the generation settings the case was found with.
+    let s = case_steps(case)
+    if case.has_steps {
+        println!(
+            "Steps:   up to ",
+            s.max,
+            " operations (mean ",
+            s.mean,
+            ")",
+        )
+    } else {
+        println!(
+            "Steps:   up to ",
+            s.max,
+            " operations (schema-1 file: no settings recorded, using the 0.1.0 defaults)",
+        )
+    }
     if target == "permissions" {
         return finish_replay(against_cached(), s, case, opts)
     }
@@ -592,7 +670,7 @@ uses (out: mut Stdout, fs: mut Fs)
                 case.verdict.code(),
                 ").",
             )
-            EXIT_NOT_REPRODUCED
+            EXIT_DIFFERENT_FAILURE
         },
         ReplayOutcome::Invalid => {
             println!(
@@ -604,7 +682,7 @@ uses (out: mut Stdout, fs: mut Fs)
             println!(
                 "DRIFT: operation ",
                 step + 1,
-                " no longer matches the recorded `op` line; the generator or model changed.",
+                " does not match the recorded trace (changed, missing or extra operation, or unread choices); the case file, generator or model changed.",
             )
             EXIT_BAD_CASE
         },

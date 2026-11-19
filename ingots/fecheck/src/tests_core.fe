@@ -459,3 +459,49 @@ fn sum_is_order_independent() {
     )
     assert!(report.passed())
 }
+
+// ---------------------------------------------------------------- 0.2.0 regressions
+
+/// Probability 1 means always. Before 0.2.0, `draw_weighted(1, 1)` fell
+/// back to a fair coin (45 of 100 draws were true for one seed).
+#[test]
+fn draw_weighted_certain_is_always_true() {
+    var src = Source::random(7, 4096)
+    var hits: u64 = 0
+    var i: u64 = 0
+    while i < 100 {
+        if src.draw_weighted(1, 1) {
+            hits += 1
+        }
+        if src.draw_weighted(5, 3) {
+            hits += 1
+        }
+        i += 1
+    }
+    assert!(hits == 200)
+    // Each draw records one choice, 1, so replay and shrinking still work.
+    assert!(src.len() == 200)
+    assert!(src.choices()[0] == 1)
+    // A replayed 0 still reads as false, so the shrinker can cut there.
+    var replayed = Source::replay(choices_from([0]), 4096)
+    assert!(!replayed.draw_weighted(1, 1))
+    // Never-true weights stay false and record nothing.
+    var never = Source::random(7, 4096)
+    assert!(!never.draw_weighted(0, 5) && !never.draw_weighted(5, 0))
+    assert!(never.len() == 0)
+}
+
+/// The largest `--cases` value is rejected as invalid instead of aborting
+/// while `Config::new` computes the discard limit.
+#[test]
+fn huge_case_counts_are_rejected_not_aborted() {
+    let config = Config::new(seed: 1, cases: 0xFFFFFFFFFFFFFFFF)
+    assert!(config.max_discards == 0xFFFFFFFFFFFFFFFF)
+    let report = check(|src: mut Source| Verdict::Pass, config)
+    assert!(report.exit_code() == 2)
+    assert!(report.cases_run == 0)
+    match report.status {
+        Status::InvalidConfig { problem } => assert!(problem == 3),
+        _ => assert!(false),
+    }
+}

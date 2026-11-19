@@ -22,14 +22,14 @@ candidate, inside plain `fe test`. Only the CLI file declares `Stdout`,
 ## What to run
 
 ```sh
-./scripts/test.sh            # all suites, CLI build, 25 CLI checks
+./scripts/contract-demo.sh   # Demo C: minimized EVM transaction sequence, both contracts
+./scripts/test.sh            # all suites, external ingot, CLI build, CLI checks
 ./out/fecheck demo           # Demo A and B end to end
-fe test examples/contract    # Demo C
 ```
 
 ## Required details
 
-* Repository: (to be published; not pushed by the agent)
+* Repository: https://github.com/Xuefeng-Zhu/fecheck (private until the owner makes it public)
 * License: Apache-2.0
 * Compiler: `fe 26.6.0 (5b3f96a)`
 * Commit SHA: see `git rev-parse HEAD` (recorded in the final handoff)

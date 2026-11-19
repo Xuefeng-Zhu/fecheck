@@ -1,0 +1,19 @@
+# FeCheck regression case. Replay with: fecheck replay <this file>
+fecheck-case 1
+test revoked_agent_cannot_execute
+target permissions
+compiler fe 26.6.0
+fecheck 0.1.0
+seed 12345
+case 44
+cases 1000
+verdict fail 1
+failed-step 3
+original-length 7
+choices 1 0 2 1 2 2 1 1 2 1 2 2
+op Grant(agent=2)
+op Execute(agent=2)
+op Revoke(agent=2)
+op Execute(agent=2)
+violation revoked_agent_cannot_execute: an agent without a current grant was allowed to execute
+end

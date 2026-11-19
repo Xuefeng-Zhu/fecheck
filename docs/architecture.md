@@ -109,18 +109,21 @@ fresh deployment per run via `evm.create`.
 
 ## Replay and artifacts
 
-`.case` files are line-oriented, versioned text (schema 1, see
-`artifact.fe`). They carry the shrunk choices (the replay input), provenance
+`.case` files are line-oriented, versioned text (schema 2, see
+`artifact.fe`; schema 1 is still read). They carry the shrunk choices (the
+replay input), the generation settings (`steps <max> <mean>`), provenance
 (seed, case index, compiler) and the expected outcome (verdict, failed step,
-rendered ops, violation). Replay classifies the result as:
+rendered ops, violation). Replay runs with the recorded settings and checks
+the whole recorded trace: exactly as many operations as recorded, each
+identical, every recorded choice read. Then it classifies the result as:
 
 | Outcome | Meaning | CLI exit |
 |---|---|---|
 | `Reproduced` | same verdict kind, code and step | 0 |
 | `NoLongerFails` | the same operations now pass | 3 |
-| `DifferentFailure` | fails, but not as recorded | 3 |
+| `DifferentFailure` | fails, but not as recorded | 5 |
 | `Invalid` | the choices no longer form a valid case | 4 |
-| `Drift` | regenerated ops differ from the recorded `op` lines | 4 |
+| `Drift` | regenerated trace differs from the recorded one (an op changed, missing or extra; choices left unread) | 4 |
 
 The parser treats files as untrusted: bounded file, line and choice counts,
 strict key order, decimal-only u64 parsing with overflow checks, mandatory

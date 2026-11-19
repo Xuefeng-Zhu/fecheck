@@ -1,13 +1,69 @@
-use std::evm::Evm
-use fecheck::{Source, Verdict, Config, check, copy_choices, run_choices}
+use std::evm::{Evm, Log}
+use fecheck::{Source, Verdict, Config, check, copy_choices, run_choices, choices_from}
 use ingot::{CachedRegistry, FixedRegistry, PermissionMsg}
 
 pub const REVOKED_AGENT_EXECUTED: u64 = 1
 pub const GRANTED_AGENT_DENIED: u64 = 2
 
+// Events the counterexample report emits, one per line of the report.
+// `scripts/contract-demo.sh` runs `fe test --show-logs` and decodes them.
+// Every event's first field is a tag, so the script needs no ABI.
+
+/// One transaction of a replayed case. kind: 0 grant, 1 revoke, 2 execute.
+/// expected/actual: 0 false, 1 true, 2 no return value. skipped: the
+/// precondition (revoke needs an existing grant) filtered it out.
+#[event]
+struct TxLine {
+    tag: u256,
+    target: u256,
+    step: u256,
+    kind: u256,
+    agent: u256,
+    skipped: u256,
+    expected: u256,
+    actual: u256,
+}
+
+/// The search result: cases run, failing case, original and shrunk sizes.
+#[event]
+struct SearchLine {
+    tag: u256,
+    seed: u256,
+    cases_run: u256,
+    failing_case: u256,
+    original_choices: u256,
+    shrunk_choices: u256,
+    shrink_attempts: u256,
+    code: u256,
+}
+
+/// The verdict of replaying the shrunk case against `target` (0 cached,
+/// 1 fixed). kind: 0 pass, 2 fail; code: the failure code.
+#[event]
+struct VerdictLine { tag: u256, target: u256, kind: u256, code: u256 }
+
+pub const TAG_TX: u256 = 1
+pub const TAG_SEARCH: u256 = 2
+pub const TAG_VERDICT: u256 = 3
+
+fn bit(_ b: bool) -> u256 {
+    if b { 1 } else { 0 }
+}
+
 /// One generated command sequence against a freshly deployed `C`.
 /// The model is a 4-bit set of granted agents.
 fn registry_case<C: std::evm::Contract<InitArgs = ()>>(_ src: mut Source) -> Verdict
+uses (evm: mut Evm)
+{
+    run_registry<C>(mut src, record: false, target: 0)
+}
+
+/// `registry_case`, optionally emitting one `TxLine` per transaction.
+fn run_registry<C: std::evm::Contract<InitArgs = ()>>(
+    _ src: mut Source,
+    record: bool,
+    target: u256,
+) -> Verdict
 uses (evm: mut Evm)
 {
     let addr = evm.create<C>(value: Wei::zero(), args: ())
@@ -28,6 +84,20 @@ uses (evm: mut Evm)
                 message: PermissionMsg::Grant { agent: agent as u256 },
             )
             granted[i] = true
+            if record {
+                evm.emit(
+                    TxLine {
+                        tag: TAG_TX,
+                        target,
+                        step: step as u256,
+                        kind: 0,
+                        agent: agent as u256,
+                        skipped: 0,
+                        expected: 2,
+                        actual: 2,
+                    },
+                )
+            }
         } else if kind == 1 {
             // Precondition: only an existing grant can be revoked.
             if granted[i] {
@@ -38,6 +108,33 @@ uses (evm: mut Evm)
                     message: PermissionMsg::Revoke { agent: agent as u256 },
                 )
                 granted[i] = false
+                if record {
+                    evm.emit(
+                        TxLine {
+                            tag: TAG_TX,
+                            target,
+                            step: step as u256,
+                            kind: 1,
+                            agent: agent as u256,
+                            skipped: 0,
+                            expected: 2,
+                            actual: 2,
+                        },
+                    )
+                }
+            } else if record {
+                evm.emit(
+                    TxLine {
+                        tag: TAG_TX,
+                        target,
+                        step: step as u256,
+                        kind: 1,
+                        agent: agent as u256,
+                        skipped: 1,
+                        expected: 2,
+                        actual: 2,
+                    },
+                )
             }
         } else {
             let allowed: bool = evm
@@ -47,6 +144,20 @@ uses (evm: mut Evm)
                     value: Wei::zero(),
                     message: PermissionMsg::Execute { agent: agent as u256 },
                 )
+            if record {
+                evm.emit(
+                    TxLine {
+                        tag: TAG_TX,
+                        target,
+                        step: step as u256,
+                        kind: 2,
+                        agent: agent as u256,
+                        skipped: 0,
+                        expected: bit(granted[i]),
+                        actual: bit(allowed),
+                    },
+                )
+            }
             if allowed && !granted[i] {
                 return Verdict::Fail { code: REVOKED_AGENT_EXECUTED }
             }
@@ -96,4 +207,71 @@ fn fixed_contract_passes() uses (evm: mut Evm) {
         Config::new(seed: 12345, cases: 300),
     )
     assert!(report.passed())
+}
+
+/// The end-to-end counterexample report: search with `CachedRegistry`,
+/// shrink, then replay the shrunk transactions against both contracts,
+/// emitting every line as an event. Run it with `scripts/contract-demo.sh`
+/// (or `fe test examples/contract --filter counterexample --show-logs`).
+#[test]
+fn contract_counterexample_report() uses (evm: mut Evm) {
+    let seed: u64 = 12345
+    let report = check(
+        |src: mut Source| registry_case<CachedRegistry>(mut src),
+        Config::new(seed, cases: 300),
+    )
+    assert!(report.failed())
+    evm.emit(
+        SearchLine {
+            tag: TAG_SEARCH,
+            seed: seed as u256,
+            cases_run: report.cases_run as u256,
+            failing_case: report.failing_case as u256,
+            original_choices: report.original.len() as u256,
+            shrunk_choices: report.shrunk.len() as u256,
+            shrink_attempts: report.shrink.attempts as u256,
+            code: report.shrunk_verdict.code() as u256,
+        },
+    )
+    var buggy_src = Source::replay(copy_choices(report.shrunk), 4096)
+    let buggy = run_registry<CachedRegistry>(mut buggy_src, record: true, target: 0)
+    evm.emit(
+        VerdictLine {
+            tag: TAG_VERDICT,
+            target: 0,
+            kind: buggy.kind() as u256,
+            code: buggy.code() as u256,
+        },
+    )
+    var fixed_src = Source::replay(copy_choices(report.shrunk), 4096)
+    let fixed = run_registry<FixedRegistry>(mut fixed_src, record: true, target: 1)
+    evm.emit(
+        VerdictLine {
+            tag: TAG_VERDICT,
+            target: 1,
+            kind: fixed.kind() as u256,
+            code: fixed.code() as u256,
+        },
+    )
+    assert!(buggy.code() == REVOKED_AGENT_EXECUTED)
+    assert!(fixed.is_pass())
+}
+
+// Regression tests generated from `contract_counterexample_report` (seed
+// 12345): grant(1), execute(1), revoke(1), execute(1). Each transaction is
+// three choices: the "more" flag, the kind (0 grant, 1 revoke, 2 execute)
+// and the agent.
+const STALE_CACHE: [u64; 12] = [1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1]
+
+#[test]
+fn regression_stale_cache_fails_on_cached_registry() uses (evm: mut Evm) {
+    var src = Source::replay(choices_from(STALE_CACHE), 4096)
+    let v = registry_case<CachedRegistry>(mut src)
+    assert!(v.is_failure() && v.code() == REVOKED_AGENT_EXECUTED)
+}
+
+#[test]
+fn regression_stale_cache_passes_on_fixed_registry() uses (evm: mut Evm) {
+    var src = Source::replay(choices_from(STALE_CACHE), 4096)
+    assert!(registry_case<FixedRegistry>(mut src).is_pass())
 }

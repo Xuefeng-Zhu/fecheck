@@ -6,10 +6,10 @@
 // failure happens. The seed is kept as provenance only; replay never needs
 // it.
 //
-// Format (schema 1): UTF-8 text, one `key value` pair per line, `#` starts a
+// Format (schema 2): UTF-8 text, one `key value` pair per line, `#` starts a
 // comment line. Keys must appear in this order; `op` repeats.
 //
-//     fecheck-case 1
+//     fecheck-case 2
 //     test <name>
 //     target <implementation the failure was found against>
 //     compiler <compiler version>
@@ -17,6 +17,7 @@
 //     seed <u64>
 //     case <u64>
 //     cases <u64>
+//     steps <max> <mean>           (schema 2; the generation settings)
 //     verdict <pass|discard|fail|error> <code>
 //     failed-step <u64, or "none">
 //     original-length <u64>
@@ -24,6 +25,10 @@
 //     op <rendered command>        (zero or more)
 //     violation <one-line explanation>
 //     end
+//
+// Schema 1 files (FeCheck 0.1.0) have no `steps` line. They are still
+// read, with `has_steps` false, and replayed with the settings the 0.1.0 CLI
+// always used (40 operations, mean 12); see `case_steps`.
 //
 // The parser treats a case file as untrusted input: every line is length
 // checked, numbers must fit in a u64, the choice count is bounded, unknown
@@ -34,8 +39,13 @@ use core::{MemBuffer, MemSpan, MemVec}
 use core::text::parse_uint
 use super::verdict::{Verdict, kind_name, verdict_from_parts}
 
-pub const SCHEMA_VERSION: u64 = 1
-pub const FECHECK_VERSION: String<5> = "0.1.0"
+pub const SCHEMA_VERSION: u64 = 2
+/// The oldest schema this FeCheck still reads.
+pub const MIN_SCHEMA_VERSION: u64 = 1
+pub const FECHECK_VERSION: String<5> = "0.2.0"
+/// Generation settings assumed for schema-1 files, which did not record them.
+pub const LEGACY_STEPS_MAX: u64 = 40
+pub const LEGACY_STEPS_MEAN: u64 = 12
 pub const MAX_CASE_CHOICES: usize = 4096
 pub const MAX_CASE_OPS: usize = 4096
 pub const MAX_LINE: usize = 65536
@@ -50,6 +60,11 @@ pub struct Case {
     pub seed: u64,
     pub case_index: u64,
     pub cases: u64,
+    /// The state-machine generation settings the case was found with.
+    /// False for schema-1 files, which did not record them.
+    pub has_steps: bool,
+    pub steps_max: u64,
+    pub steps_mean: u64,
     pub verdict: Verdict,
     pub failed_step: u64,
     pub has_failed_step: bool,
@@ -139,6 +154,17 @@ pub fn encode(_ case: Case) -> MemBuffer {
     writeln!(mut out, "seed ", case.seed)
     writeln!(mut out, "case ", case.case_index)
     writeln!(mut out, "cases ", case.cases)
+    let steps_max = if case.has_steps {
+        case.steps_max
+    } else {
+        LEGACY_STEPS_MAX
+    }
+    let steps_mean = if case.has_steps {
+        case.steps_mean
+    } else {
+        LEGACY_STEPS_MEAN
+    }
+    writeln!(mut out, "steps ", steps_max, " ", steps_mean)
     writeln!(
         mut out,
         "verdict ",
@@ -165,7 +191,8 @@ pub fn encode(_ case: Case) -> MemBuffer {
     out
 }
 
-/// The keys of the format, in order. `op` (index 12) may repeat.
+/// The keys of the format, in order. `op` (index 13) may repeat; `steps`
+/// (index 8) is absent from schema-1 files.
 fn expected_key(_ index: u64) -> String<15> {
     if index == 0 {
         "fecheck-case"
@@ -184,16 +211,18 @@ fn expected_key(_ index: u64) -> String<15> {
     } else if index == 7 {
         "cases"
     } else if index == 8 {
-        "verdict"
+        "steps"
     } else if index == 9 {
-        "failed-step"
+        "verdict"
     } else if index == 10 {
-        "original-length"
+        "failed-step"
     } else if index == 11 {
-        "choices"
+        "original-length"
     } else if index == 12 {
+        "choices"
+    } else if index == 13 {
         "op"
-    } else if index == 13 { "violation" } else { "end" }
+    } else if index == 14 { "violation" } else { "end" }
 }
 
 /// Parses a decimal u64; `None` on anything else, including overflow.
@@ -241,6 +270,9 @@ fn empty_case() -> Case {
         seed: 0,
         case_index: 0,
         cases: 0,
+        has_steps: false,
+        steps_max: LEGACY_STEPS_MAX,
+        steps_mean: LEGACY_STEPS_MEAN,
         verdict: Verdict::Error { code: 0 },
         failed_step: 0,
         has_failed_step: false,
@@ -285,16 +317,20 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         let key = trimmed.slice(offset: 0, len: key_len)
         let rest = trimmed.slice(offset: rest_start, len: trimmed.len() - rest_start)
 
-        // Repeated `op` lines stay at index 12; anything else advances.
-        if key_index == 13 && key == "op" {
-            key_index = 12
+        // Schema 1 has no `steps` line.
+        if key_index == 8 && case.schema == 1 {
+            key_index = 9
         }
-        if key_index > 14 {
+        // Repeated `op` lines stay at index 13; anything else advances.
+        if key_index == 14 && key == "op" {
+            key_index = 13
+        }
+        if key_index > 15 {
             return Result::Err(ParseError::TrailingData { line: line_no })
         }
         // `op` lines are optional: allow skipping straight to `violation`.
-        if key_index == 12 && key == "violation" {
-            key_index = 13
+        if key_index == 13 && key == "violation" {
+            key_index = 14
         }
         if key != expected_key(key_index) {
             if key_index == 0 {
@@ -306,7 +342,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         if key_index == 0 {
             match parse_u64(rest) {
                 Option::Some(v) => {
-                    if v != SCHEMA_VERSION {
+                    if v < MIN_SCHEMA_VERSION || v > SCHEMA_VERSION {
                         return Result::Err(ParseError::UnsupportedSchema { found: v })
                     }
                     case.schema = v
@@ -326,7 +362,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
             case.compiler = format!(rest)
         } else if key_index == 4 {
             // Library version: informational.
-        } else if key_index == 5 || key_index == 6 || key_index == 7 || key_index == 10 {
+        } else if key_index == 5 || key_index == 6 || key_index == 7 || key_index == 11 {
             match parse_u64(rest) {
                 Option::Some(v) => {
                     if key_index == 5 {
@@ -344,6 +380,26 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                 },
             }
         } else if key_index == 8 {
+            match rest.index_of(b' ') {
+                Option::Some(i) => {
+                    let max_text = rest.slice(offset: 0, len: i)
+                    let mean_text = rest.slice(offset: i + 1, len: rest.len() - i - 1)
+                    match (parse_u64(max_text), parse_u64(mean_text)) {
+                        (Option::Some(m), Option::Some(n)) => {
+                            case.has_steps = true
+                            case.steps_max = m
+                            case.steps_mean = n
+                        },
+                        _ => {
+                            return Result::Err(ParseError::BadNumber { line: line_no })
+                        },
+                    }
+                },
+                Option::None => {
+                    return Result::Err(ParseError::BadNumber { line: line_no })
+                },
+            }
+        } else if key_index == 9 {
             match rest.index_of(b' ') {
                 Option::Some(i) => {
                     let name = rest.slice(offset: 0, len: i)
@@ -366,7 +422,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     return Result::Err(ParseError::BadVerdict { line: line_no })
                 },
             }
-        } else if key_index == 9 {
+        } else if key_index == 10 {
             if rest == "none" {
                 case.has_failed_step = false
             } else {
@@ -380,7 +436,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     },
                 }
             }
-        } else if key_index == 11 {
+        } else if key_index == 12 {
             if rest.len() > 0 {
                 for field in rest.split(b' ') {
                     if field.len() == 0 {
@@ -397,14 +453,14 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     }
                 }
             }
-        } else if key_index == 12 {
+        } else if key_index == 13 {
             if case.ops.len() >= MAX_CASE_OPS {
                 return Result::Err(ParseError::TooManyOps)
             }
             case.ops.push(format!(rest))
-        } else if key_index == 13 {
-            case.violation = format!(rest)
         } else if key_index == 14 {
+            case.violation = format!(rest)
+        } else if key_index == 15 {
             ended = true
         }
         key_index += 1

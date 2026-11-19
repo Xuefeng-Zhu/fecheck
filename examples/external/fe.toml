@@ -1,0 +1,9 @@
+# A stand-alone ingot that uses FeCheck as a dependency, the way your own
+# project would. `scripts/external-check.sh` copies this directory outside
+# the repository, points the dependency at this checkout, and runs it.
+[ingot]
+name = "my_project"
+version = "0.1.0"
+
+[dependencies]
+fecheck = { path = "../../ingots/fecheck" }

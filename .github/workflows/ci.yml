@@ -22,9 +22,11 @@ jobs:
           echo "$HOME/.fe/bin" >> "$GITHUB_PATH"
       - run: fe --version
       - name: Format check
-        run: for d in ingots/fecheck examples/permissions examples/queue examples/contract cli; do fe fmt --check "$d"; done
-      - name: Tests (EVM + native), CLI build and end-to-end checks
+        run: for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/external cli; do fe fmt --check "$d"; done
+      - name: Tests (EVM + native), external ingot, EVM contract demo, CLI build and end-to-end checks
         run: ./scripts/test.sh
+      - name: EVM contract counterexample (Demo C)
+        run: ./scripts/contract-demo.sh
       - name: Demo
         run: ./out/fecheck demo --dir ci-failures
       - uses: actions/upload-artifact@v4

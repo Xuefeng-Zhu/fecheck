@@ -6,12 +6,19 @@
 // the recorded `op` lines first: if the generator or model changed so that
 // the same choices now mean different commands, replay reports drift instead
 // of silently testing something else.
+//
+// The comparison covers the whole recorded trace: the replay must
+// regenerate exactly the recorded number of operations, each verbatim, and
+// read every recorded choice. A case file with an operation removed,
+// or a replay that would run past the recorded trace, is drift, never a
+// reproduction. State-machine cases replay with the generation settings
+// they were found with (`steps` in the file), not the caller's.
 
 use core::{MemBuffer, MemVec}
 use super::source::{Source, copy_choices, DEFAULT_MAX_CHOICES}
 use super::verdict::Verdict
-use super::artifact::Case
-use super::machine::{StateMachine, Steps, Trace, run_traced, NO_STEP}
+use super::artifact::{Case, LEGACY_STEPS_MAX, LEGACY_STEPS_MEAN}
+use super::machine::{StateMachine, Steps, Trace, run_traced, steps as make_steps, NO_STEP}
 
 pub enum ReplayOutcome {
     /// The recorded failure happened again, at the same step.
@@ -57,14 +64,34 @@ uses F::E
     classify(v, src.overran(), NO_STEP, case)
 }
 
+/// The generation settings to replay `case` with: the recorded ones, or the
+/// 0.1.0 defaults for a schema-1 file that did not record them.
+pub fn case_steps(_ case: Case) -> Steps {
+    if case.has_steps {
+        make_steps(case.steps_max, case.steps_mean)
+    } else {
+        make_steps(LEGACY_STEPS_MAX, LEGACY_STEPS_MEAN)
+    }
+}
+
 /// Replays a state-machine case. Returns the outcome and the full trace.
-pub fn replay_machine<M: StateMachine>(_ machine: M, _ steps: Steps, _ case: Case) -> (
+///
+/// `fallback` is used only for a case that recorded no generation settings
+/// (schema 1) and that has no `steps` of its own; a case that recorded them
+/// always replays with its own, whatever `fallback` says.
+pub fn replay_machine<M: StateMachine>(_ machine: M, _ fallback: Steps, _ case: Case) -> (
     ReplayOutcome,
     Trace,
 ) {
+    let s = if case.has_steps {
+        case_steps(case)
+    } else {
+        fallback
+    }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
-    let trace = run_traced(machine, mut src, steps)
-    // Every recorded op must be regenerated, in order and verbatim.
+    let trace = run_traced(machine, mut src, s)
+    // Every recorded op must be regenerated, in order and verbatim, and
+    // nothing more: the regenerated trace has exactly the recorded length.
     var i: usize = 0
     while i < case.ops.len() {
         if i >= trace.steps.len() {
@@ -74,6 +101,16 @@ pub fn replay_machine<M: StateMachine>(_ machine: M, _ steps: Steps, _ case: Cas
             return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
         }
         i += 1
+    }
+    if trace.steps.len() != case.ops.len() {
+        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
+    }
+    // Every recorded choice must be read: unread choices mean the file and
+    // the generator disagree. (Reads past the end return 0, which stops the
+    // sequence; a fixed target that passes the last recorded operation makes
+    // exactly one such read.)
+    if !src.overran() && src.unread() != 0 {
+        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
     }
     let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
     (outcome, trace)
@@ -106,6 +143,7 @@ pub fn machine_case(
     seed: u64,
     case_index: u64,
     cases: u64,
+    steps: Steps,
     original_length: u64,
     _ choices: MemVec<u64>,
     _ trace: Trace,
@@ -115,13 +153,16 @@ pub fn machine_case(
         ops.push(format!(step.command))
     }
     Case {
-        schema: 1,
+        schema: 2,
         test,
         target,
         compiler,
         seed,
         case_index,
         cases,
+        has_steps: true,
+        steps_max: steps.max,
+        steps_mean: steps.mean,
         verdict: trace.verdict,
         failed_step: trace.failed_step,
         has_failed_step: trace.failed_step != NO_STEP,

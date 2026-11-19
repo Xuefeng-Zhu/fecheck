@@ -75,6 +75,29 @@ pub struct Steps {
 
 impl Copy for Steps {}
 
+/// The longest command sequence a state-machine test may request.
+pub const MAX_STEPS: u64 = 1000
+pub const STEPS_NONE: u64 = 1
+pub const STEPS_TOO_MANY: u64 = 2
+pub const STEPS_NO_MEAN: u64 = 3
+
+impl Steps {
+    /// Why these settings are unusable, or 0 when they are valid. A run
+    /// with `max == 0` would execute no operations and "pass" vacuously.
+    pub fn problem(self) -> u64 {
+        if self.max == 0 {
+            return STEPS_NONE
+        }
+        if self.max > MAX_STEPS {
+            return STEPS_TOO_MANY
+        }
+        if self.mean == 0 {
+            return STEPS_NO_MEAN
+        }
+        0
+    }
+}
+
 pub fn steps(_ max: u64, _ mean: u64) -> Steps {
     Steps { max, mean }
 }

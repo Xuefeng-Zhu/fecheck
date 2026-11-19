@@ -1,0 +1,21 @@
+# Before the fix: FeCheck 0.1.0 (commit ce4c6dd), fe 26.6.0, x86-64 under qemu-user
+$ fecheck run queue --seed 2388 --steps 80 --no-shrink --save long.case
+Original: 41 operations (86 choices)
+Shrunk:   41 operations (86 choices) after 0 candidates, 0 accepted
+exit 1
+$ fecheck replay long.case
+DRIFT: operation 41 no longer matches the recorded `op` line; the generator or model changed.
+exit 4
+$ fecheck replay short.case   # p.case with its final op line deleted
+REPRODUCED: the recorded failure happened again at operation 4.
+exit 0
+$ fecheck replay other.case   # recorded verdict code changed
+DIFFERENT FAILURE: fail code 1 at operation 4 (recorded: fail code 999).
+exit 3 (same as the fixed exit code 3)
+$ fecheck run permissions-fixed --steps 0
+Property passed: 1000 cases, 0 discarded.
+exit 0
+$ fecheck run permissions --cases 18446744073709551615
+panicked: arithmetic overflow
+qemu: uncaught target signal 6 (Aborted) - core dumped
+exit 134

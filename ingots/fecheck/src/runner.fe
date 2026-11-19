@@ -35,7 +35,13 @@ impl Config {
         Config {
             seed,
             cases,
-            max_discards: cases * 10 + 100,
+            // Saturates: `Config::new` must not abort on huge counts, so
+            // that `problem()` can reject them.
+            max_discards: if cases > (0xFFFFFFFFFFFFFFFF - 100) / 10 {
+                0xFFFFFFFFFFFFFFFF
+            } else {
+                cases * 10 + 100
+            },
             max_choices: DEFAULT_MAX_CHOICES,
             shrink_budget: 5000,
         }

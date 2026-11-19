@@ -19,6 +19,12 @@ for ingot in ingots/fecheck examples/permissions examples/queue examples/contrac
     "$FE" test "$ingot"
 done
 
+echo "== FeCheck as a dependency of an ingot outside this repository"
+FE="$FE" ./scripts/external-check.sh
+
+echo "== Demo C: EVM contract counterexample, end to end"
+FE="$FE" ./scripts/contract-demo.sh
+
 if [ "${SKIP_NATIVE:-0}" = "1" ]; then
     echo "== skipping native suites (SKIP_NATIVE=1)"
     exit 0
@@ -34,4 +40,4 @@ echo "== build CLI"
 ./scripts/build.sh
 
 echo "== CLI checks"
-./scripts/cli-checks.sh
+FE_EVM="$FE" ./scripts/cli-checks.sh

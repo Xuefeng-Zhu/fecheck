@@ -56,6 +56,10 @@ pub fn case_json(_ case: Case, _ trace: Trace) -> MemBuffer {
     writeln!(mut out, "  \"seed\": \"", case.seed, "\",")
     writeln!(mut out, "  \"caseIndex\": ", case.case_index, ",")
     writeln!(mut out, "  \"cases\": ", case.cases, ",")
+    if case.has_steps {
+        writeln!(mut out, "  \"maxSteps\": ", case.steps_max, ",")
+        writeln!(mut out, "  \"meanSteps\": ", case.steps_mean, ",")
+    }
     writeln!(
         mut out,
         "  \"originalLength\": ",

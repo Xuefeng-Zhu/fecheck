@@ -1,0 +1,26 @@
+FeCheck - EVM contract test (fe test, Sonatina EVM)
+Property: a revoked agent can never execute; a granted agent always can
+Seed 12345: CachedRegistry failed on case 78 (77 passing cases before it; a fresh deployment each)
+Shrunk: 24 choices -> 12 choices after 225 candidates, each one a fresh deployment
+
+Minimized transaction sequence against CachedRegistry:
+  1. grant(1)     -> ok
+  2. execute(1)   -> expected true,  got true
+  3. revoke(1)    -> ok
+  4. execute(1)   -> expected false, got true   <-- violation
+Result on CachedRegistry: FAIL, code 1 (REVOKED_AGENT_EXECUTED)
+
+The same transactions against FixedRegistry:
+  1. grant(1)     -> ok
+  2. execute(1)   -> expected true,  got true
+  3. revoke(1)    -> ok
+  4. execute(1)   -> expected false, got false
+Result on FixedRegistry: PASS
+
+Shrunk case fails on CachedRegistry and passes on FixedRegistry: yes
+
+Checked-in regression (examples/contract/src/tests.fe), run against both contracts:
+PASS  [0.0002s] regression_stale_cache_fails_on_cached_registry
+PASS  [0.0001s] regression_stale_cache_passes_on_fixed_registry
+test result: ok. 2 passed; 0 failed
+Rerun it yourself: fe test examples/contract --filter regression_stale_cache

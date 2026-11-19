@@ -37,10 +37,15 @@ Living list. Items are honest constraints of the current implementation.
 * The CLI knows the bundled demo tests through a static registry. Users
   integrate through `fe test` and the printed regression snippet; there is
   no plug-in mechanism for third-party test binaries.
-* `fecheck replay` uses fixed step settings (`steps(40, 12)`) matching
-  `fecheck run`'s defaults; a case produced with a different `--steps` value
-  still replays (the stop flag ends the sequence) but the setting is not
-  recorded in the file.
+* Case files record the generation settings (`steps <max> <mean>`, schema
+  2) and replay uses them. Schema-1 files from 0.1.0 did not record them and
+  are replayed with the 0.1.0 defaults (40, 12); a 0.1.0 file found with a
+  different `--steps` reports `DRIFT` rather than a wrong verdict.
+* Case files store generator choices plus the rendered commands, not typed
+  commands. A regression therefore survives only as long as the generator
+  maps the same choices to the same commands; a generator change is detected
+  (`DRIFT`) but the case cannot be re-run from its commands. Saving typed
+  commands (a per-machine `Cmd` encoding) is the planned follow-up.
 * JSON is export-only; the `.case` text format is the replayable source of
   truth.
 * No web visualiser. It was optional and was skipped in favour of the CLI

@@ -2,4 +2,4 @@
 name = "fecheck_workspace"
 version = "0.1.0"
 members = ["ingots/fecheck", "examples/permissions", "examples/queue", "examples/contract", "cli"]
-exclude = ["target", "out", "web"]
+exclude = ["target", "out", "web", "examples/external"]

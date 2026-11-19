@@ -7,9 +7,20 @@ use ingot::source::{Source, copy_choices, choices_from, same_choices}
 use ingot::verdict::Verdict
 use ingot::gen::{Gen, uint_in}
 use ingot::runner::{Config, check}
-use ingot::machine::{StateMachine, steps, run_steps, run_traced, NO_STEP, POSTCONDITION_MISMATCH}
+use ingot::machine::{
+    StateMachine,
+    Steps,
+    steps,
+    run_steps,
+    run_traced,
+    NO_STEP,
+    POSTCONDITION_MISMATCH,
+    MAX_STEPS,
+    STEPS_NONE,
+    STEPS_TOO_MANY,
+}
 use ingot::artifact::{Case, ParseError, encode, decode, parse_u64}
-use ingot::replay::{ReplayOutcome, replay_machine, replay_property, machine_case}
+use ingot::replay::{ReplayOutcome, replay_machine, replay_property, machine_case, case_steps}
 
 // A counter whose `Add` loses one unit when n > 50.
 enum CounterCmd {
@@ -120,6 +131,7 @@ fn found_case(_ machine: Counter) -> Case {
         seed: 1,
         case_index: report.failing_case,
         cases: 200,
+        steps: steps(30, 8),
         original_length: 9,
         report.shrunk,
         trace,
@@ -238,8 +250,9 @@ fn case_round_trips() {
 fn malformed_cases_are_rejected() {
     assert!(parse_fails(""))
     assert!(parse_fails("hello world\n"))
-    // Unsupported schema version.
-    assert!(parse_fails("fecheck-case 2\n"))
+    // Unsupported schema versions.
+    assert!(parse_fails("fecheck-case 0\n"))
+    assert!(parse_fails("fecheck-case 3\n"))
     // Truncated: header only.
     assert!(parse_fails("fecheck-case 1\ntest t\n"))
     // Out-of-order keys.
@@ -277,6 +290,11 @@ fn malformed_cases_are_rejected() {
     assert!(
         !parse_fails(
             "fecheck-case 1\ntest t\ntarget x\ncompiler c\nfecheck 0.1.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
+        ),
+    )
+    assert!(
+        !parse_fails(
+            "fecheck-case 2\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
         ),
     )
 }
@@ -388,4 +406,158 @@ fn replay_property_round_trip() {
     case.has_failed_step = false
     let outcome = replay_property(test, case)
     assert!(outcome.is_reproduced())
+}
+
+// ---------------------------------------------------------------- 0.2.0 regressions
+
+/// A buggy-counter case found with `s`, without shrinking, so it keeps the
+/// full length of the first failing run.
+fn unshrunk_case(_ s: Steps, _ seed: u64) -> Case {
+    var config = Config::new(seed, cases: 2000)
+    config.shrink_budget = 0
+    let report = check(|src: mut Source| run_steps(buggy(), mut src, s), config)
+    assert!(report.failed())
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(buggy(), mut src, s)
+    machine_case(
+        test: format!("counter"),
+        target: format!("buggy"),
+        compiler: format!("fe 26.6.0"),
+        seed,
+        case_index: report.failing_case,
+        cases: 2000,
+        steps: s,
+        original_length: trace.len(),
+        report.shrunk,
+        trace,
+    )
+}
+
+/// A long failing run (more operations than the caller's fallback allows)
+/// replays with the settings it was found with. Before 0.2.0 the CLI
+/// replayed every case with 40 operations and reported drift.
+#[test]
+fn replay_uses_recorded_steps_for_long_cases() {
+    // 45 `Inc`s, then an `Add(60)` that the buggy counter gets wrong: a
+    // 46-operation failure, like the 41-operation queue case found with
+    // `--steps 80`.
+    var choices: MemVec<u64> = MemVec::new()
+    var i: u64 = 0
+    while i < 45 {
+        choices.push(1)
+        choices.push(0)
+        i += 1
+    }
+    choices.push(1)
+    choices.push(1)
+    choices.push(60)
+    let s = steps(200, 60)
+    var src = Source::replay(copy_choices(choices), 4096)
+    let trace = run_traced(buggy(), mut src, s)
+    assert!(trace.len() == 46 && trace.failed_step == 45)
+    let case = machine_case(
+        test: format!("counter"),
+        target: format!("buggy"),
+        compiler: format!("fe 26.6.0"),
+        seed: 0,
+        case_index: 0,
+        cases: 1,
+        steps: s,
+        original_length: 46,
+        choices,
+        trace,
+    )
+    let parsed = parse(encode(case))
+    assert!(
+        parsed.has_steps && parsed.steps_max == 200 && parsed.steps_mean == 60,
+    )
+    // The fallback (40, 12) is ignored because the case recorded its own.
+    let (outcome, trace) = replay_machine(buggy(), steps(40, 12), parsed)
+    assert!(outcome.is_reproduced())
+    assert!(trace.steps.len() == parsed.ops.len())
+    assert!(case_steps(parsed).max == 200)
+    // With only the 0.1.0 settings it cannot be replayed: drift.
+    var legacy = parse(encode(case))
+    legacy.has_steps = false
+    let (old_outcome, _) = replay_machine(buggy(), steps(40, 12), legacy)
+    assert!(old_outcome.kind() == 4)
+}
+
+/// A case file missing its final operation must not reproduce.
+#[test]
+fn replay_rejects_a_case_missing_its_last_op() {
+    let case = parse(encode(unshrunk_case(steps(30, 8), 1)))
+    assert!(case.ops.len() >= 1)
+    let text = encode(case)
+    // Rebuild the file without the last `op` line.
+    var cut = parse(text)
+    let full_len = cut.ops.len()
+    var ops: MemVec<MemBuffer> = MemVec::new()
+    var i: usize = 0
+    while i + 1 < full_len {
+        ops.push(format!(cut.ops[i]))
+        i += 1
+    }
+    cut.ops = ops
+    let short = parse(encode(cut))
+    assert!(short.ops.len() + 1 == full_len)
+    let (outcome, _) = replay_machine(buggy(), steps(30, 8), short)
+    assert!(outcome.kind() == 4)
+    // An extra, unrecorded trailing choice is drift too.
+    var longer = parse(text)
+    longer.choices.push(1)
+    longer.choices.push(1)
+    let (outcome2, _) = replay_machine(buggy(), steps(30, 8), longer)
+    assert!(!outcome2.is_reproduced())
+}
+
+/// Schema-1 files from FeCheck 0.1.0 still parse and replay.
+#[test]
+fn schema_1_files_still_replay() {
+    let case = found_case(buggy())
+    // Write the 0.1.0 format by hand: header 1, no `steps` line.
+    var text = format!(
+        "fecheck-case 1\ntest counter\ntarget buggy\ncompiler fe 26.6.0\nfecheck 0.1.0\nseed 1\ncase 0\ncases 200\n",
+    )
+    write!(mut text, "verdict fail ", case.verdict.code(), "\n")
+    write!(mut text, "failed-step ", case.failed_step, "\n")
+    write!(mut text, "original-length 9\nchoices")
+    for c in case.choices {
+        write!(mut text, " ", c)
+    }
+    write!(mut text, "\n")
+    for ref op in case.ops {
+        write!(mut text, "op ", op, "\n")
+    }
+    write!(mut text, "violation counter diverged\nend\n")
+    let old = parse(text)
+    assert!(old.schema == 1)
+    assert!(!old.has_steps)
+    assert!(case_steps(old).max == 40 && case_steps(old).mean == 12)
+    // A legacy file replays with the caller's settings.
+    let (outcome, _) = replay_machine(buggy(), steps(30, 8), old)
+    assert!(outcome.is_reproduced())
+    // Re-encoding upgrades it to the current schema with explicit steps.
+    let upgraded = parse(encode(old))
+    assert!(upgraded.schema == 2 && upgraded.has_steps)
+    // A schema-2 file without its `steps` line is rejected.
+    assert!(
+        parse_fails(
+            "fecheck-case 2\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
+        ),
+    )
+    assert!(
+        parse_fails(
+            "fecheck-case 2\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
+        ),
+    )
+}
+
+/// Zero-length runs are rejected instead of passing vacuously.
+#[test]
+fn steps_settings_are_validated() {
+    assert!(steps(0, 12).problem() == STEPS_NONE)
+    assert!(steps(MAX_STEPS + 1, 12).problem() == STEPS_TOO_MANY)
+    assert!(steps(1, 1).problem() == 0)
+    assert!(steps(MAX_STEPS, 12).problem() == 0)
 }
