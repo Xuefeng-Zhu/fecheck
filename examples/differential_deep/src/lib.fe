@@ -1,5 +1,5 @@
 // Demo D at depth, for the native backend only: every differential
-// property at 100 times its `examples/differential` case count, with a
+// property at 1000 times its `examples/differential` case count, with a
 // different seed. The EVM test runner caps gas per test, so this ingot is
 // run with `fe test --backend native` (CI does; see scripts/test.sh).
 use fecheck::{Source, Config, check}
@@ -8,7 +8,7 @@ use differential::*
 fn passes<F: Fn(mut Source) -> fecheck::Verdict>(_ f: F, _ cases: u64) -> bool
 uses F::E
 {
-    check(f, Config::new(seed: 20261124, cases: cases * 100)).passed()
+    check(f, Config::new(seed: 20261124, cases: cases * 1000)).passed()
 }
 
 #[test]

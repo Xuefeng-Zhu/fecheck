@@ -49,6 +49,9 @@ pub const SAR_I64: u64 = 23
 pub const SHL_U32: u64 = 24
 pub const DIV_I128: u64 = 25
 pub const SHIFT_U128: u64 = 26
+pub const DOWNCAST_U256: u64 = 27
+pub const DOWNCAST_I256: u64 = 28
+pub const SAT_I64: u64 = 29
 
 // ---------------------------------------------------------------- inputs
 
@@ -627,4 +630,116 @@ pub fn shift_u128_matches(_ src: mut Source) -> Verdict {
         ((x << s128) as u256) == want_l && ((x >> s128) as u256) == want_r,
         SHIFT_U128,
     )
+}
+
+/// The i64 value of a byte read as two's complement (`signed`) or not.
+fn byte_value(_ b: u256, signed: bool) -> i64 {
+    let lo = b & 0xff
+    if signed && lo >= 128 {
+        -(to_u8(to_u64(256 - lo)) as i64)
+    } else if lo >= 128 {
+        (to_u8(to_u64(lo - 128)) as i64) + 128
+    } else {
+        to_u8(to_u64(lo)) as i64
+    }
+}
+
+/// u256 -> u8 and u256 -> i8: downcast, downcast_saturate and
+/// downcast_truncate against range checks on the word.
+pub fn downcast_u256_matches(_ src: mut Source) -> Verdict {
+    let w = word(mut src)
+    // to u8
+    let a: Option<u8> = w.downcast()
+    let a_ok = if w <= 255 {
+        a == Option::Some(to_u8(to_u64(w)))
+    } else {
+        a.is_none()
+    }
+    let sa: u8 = w.downcast_saturate()
+    let sa_ok = (sa as u256) == (if w > 255 { 255 } else { w })
+    let ta: u8 = w.downcast_truncate()
+    let ta_ok = (ta as u256) == (w & 0xff)
+    // to i8
+    let b: Option<i8> = w.downcast()
+    let b_ok = match b {
+        Option::Some(v) => w <= 127 && (v as i64) == byte_value(w, signed: false),
+        Option::None => w > 127,
+    }
+    let sb: i8 = w.downcast_saturate()
+    let sb_ok = (sb as i64) == (if w > 127 {
+            127
+        } else {
+            byte_value(w, signed: false)
+        })
+    let tb: i8 = w.downcast_truncate()
+    let tb_ok = (tb as i64) == byte_value(w, signed: true)
+    ensure(
+        a_ok && sa_ok && ta_ok && b_ok && sb_ok && tb_ok,
+        DOWNCAST_U256,
+    )
+}
+
+/// i256 -> u8 and i256 -> i8, the i256 built from a word's bits. A word
+/// at or above 2^255 is negative: x = w - 2^256.
+pub fn downcast_i256_matches(_ src: mut Source) -> Verdict {
+    let w = word(mut src)
+    let x: i256 = w.downcast_unchecked()
+    let negative = (w >> 255) == 1
+    // to u8: Some iff 0 <= x <= 255
+    let a: Option<u8> = x.downcast()
+    let a_ok = match a {
+        Option::Some(v) => !negative && w <= 255 && (v as u256) == w,
+        Option::None => negative || w > 255,
+    }
+    let sa: u8 = x.downcast_saturate()
+    let sa_want: u256 = if negative {
+        0
+    } else if w > 255 { 255 } else { w }
+    let sa_ok = (sa as u256) == sa_want
+    let ta: u8 = x.downcast_truncate()
+    let ta_ok = (ta as u256) == (w & 0xff)
+    // to i8: Some iff -128 <= x <= 127, i.e. w <= 127 or w >= 2^256 - 128
+    let fits_i8 = w <= 127 || w >= U256_MAX - 127
+    let b: Option<i8> = x.downcast()
+    let b_ok = match b {
+        Option::Some(v) => fits_i8 && (v as i64) == byte_value(w, signed: true),
+        Option::None => !fits_i8,
+    }
+    let sb: i8 = x.downcast_saturate()
+    let sb_want: i64 = if fits_i8 {
+        byte_value(w, signed: true)
+    } else if negative { -128 } else { 127 }
+    let sb_ok = (sb as i64) == sb_want
+    let tb: i8 = x.downcast_truncate()
+    let tb_ok = (tb as i64) == byte_value(w, signed: true)
+    ensure(
+        a_ok && sa_ok && ta_ok && b_ok && sb_ok && tb_ok,
+        DOWNCAST_I256,
+    )
+}
+
+/// i64 saturating add, sub and mul clamp to [i64::MIN, i64::MAX], the
+/// exact result computed in i256.
+pub fn saturating_i64_matches(_ src: mut Source) -> Verdict {
+    let a = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
+    let b = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
+    let op = src.draw(2)
+    let got: i64 = if op == 0 {
+        a.saturating_add(b)
+    } else if op == 1 {
+        a.saturating_sub(b)
+    } else {
+        a.saturating_mul(b)
+    }
+    let wa = a as i256
+    let wb = b as i256
+    let exact: i256 = if op == 0 {
+        wa + wb
+    } else if op == 1 { wa - wb } else { wa * wb }
+    let lo = i64::min() as i256
+    let hi = i64::max() as i256
+    let want: i256 = if exact < lo {
+        lo
+    } else if exact > hi { hi } else { exact }
+    ensure((got as i256) == want, SAT_I64)
 }

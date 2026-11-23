@@ -135,3 +135,23 @@ fn div_i128_agrees() {
 fn shift_u128_agrees() {
     assert!(passes(|src: mut Source| shift_u128_matches(mut src), 500))
 }
+#[test]
+fn downcast_u256_agrees() {
+    assert!(
+        passes(|src: mut Source| downcast_u256_matches(mut src), 500),
+    )
+}
+
+#[test]
+fn downcast_i256_agrees() {
+    assert!(
+        passes(|src: mut Source| downcast_i256_matches(mut src), 500),
+    )
+}
+
+#[test]
+fn saturating_i64_agrees() {
+    assert!(
+        passes(|src: mut Source| saturating_i64_matches(mut src), 500),
+    )
+}
