@@ -325,3 +325,37 @@ fn a_huge_mean_does_not_overflow() {
         .generate(mut src2)
     assert!(v.len() == 3)
 }
+
+#[test]
+fn normalized_failure_must_replay_on_explicit_zero() {
+    let r = check(
+        |src: mut Source| {
+            let x = src.draw(100)
+            if x == 0 && src.past_end() == 0 {
+                Verdict::Pass
+            } else {
+                Verdict::Fail { code: 9 }
+            }
+        },
+        Config::new(seed: 1, cases: 200),
+    )
+    assert!(r.unstable() && r.shrunk_verdict.is_pass())
+    assert!(r.shrunk.len() == 1 && r.shrunk[0] == 0)
+}
+
+#[test]
+fn same_code_with_extra_read_is_unstable_without_shrinking() {
+    var cfg = Config::new(seed: 1, cases: 1)
+    cfg.shrink_budget = 0
+    let r = check(
+        |src: mut Source| {
+            let _ = src.draw(5)
+            if src.is_replaying() {
+                let _ = src.draw(7)
+            }
+            Verdict::Fail { code: 7 }
+        },
+        cfg,
+    )
+    assert!(r.unstable() && r.shrunk_verdict.code() == 7)
+}

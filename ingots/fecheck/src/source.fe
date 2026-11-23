@@ -161,6 +161,10 @@ impl Source {
         self.prefix.len() - self.pos
     }
 
+    pub fn exact(self) -> bool {
+        !self.overran() && self.clamped() == 0 && self.past_end() == 0 && self.unread() == 0
+    }
+
     /// Whether this source is replaying recorded choices.
     pub fn is_replaying(self) -> bool {
         self.replaying

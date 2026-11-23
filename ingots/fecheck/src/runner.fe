@@ -77,9 +77,8 @@ pub enum Status {
     InvalidConfig { pub problem: u64 },
     /// Too many cases were discarded to reach the requested count.
     GaveUp,
-    /// A case failed, but rerunning its exact choices gave a different
-    /// verdict, so the test is nondeterministic. Nothing was shrunk;
-    /// `original_verdict` is the first run, `shrunk_verdict` the rerun.
+    /// The original or normalized choices did not replay exactly with the
+    /// original failure kind and code.
     Unstable,
 }
 
@@ -169,6 +168,18 @@ uses F::E
     (verdict, src.into_choices())
 }
 
+/// Confirm without accepting any repairs or ignoring an unread suffix.
+fn confirm<F: Fn(mut Source) -> Verdict>(_ test: F, _ choices: MemVec<u64>, _ limit: usize) -> (
+    Verdict,
+    bool,
+)
+uses F::E
+{
+    var src = Source::replay(copy_choices(choices), limit)
+    let v = test(mut src)
+    (v, src.exact())
+}
+
 /// Checks `test` against `config.cases` generated cases, and shrinks the
 /// first failure found.
 pub fn check<F: Fn(mut Source) -> Verdict>(_ test: F, _ config: Config) -> Report
@@ -207,8 +218,8 @@ uses F::E
             // Confirm the failure before shrinking: the shrinker trusts that
             // these choices fail this way, which a nondeterministic test
             // breaks.
-            let (again, _) = run_choices(test, copy_choices(choices), config.max_choices)
-            if !again.same_failure(verdict) {
+            let (again, exact) = confirm(test, choices, config.max_choices)
+            if !exact || !again.same_failure(verdict) {
                 report.status = Status::Unstable
                 report.failing_case = index
                 report.failing_case_seed = seed
@@ -225,11 +236,16 @@ uses F::E
                 config.max_choices,
                 config.shrink_budget,
             )
-            report.status = Status::Failed
+            let (final_verdict, final_exact) = confirm(test, result.choices, config.max_choices)
+            report.status = if final_exact && final_verdict.same_failure(verdict) {
+                Status::Failed
+            } else {
+                Status::Unstable
+            }
             report.failing_case = index
             report.failing_case_seed = seed
             report.original_verdict = verdict
-            report.shrunk_verdict = result.verdict
+            report.shrunk_verdict = final_verdict
             report.original = result.original
             report.shrunk = result.choices
             report.shrink = result.stats
