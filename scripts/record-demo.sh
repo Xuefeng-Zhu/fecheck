@@ -3,6 +3,8 @@
 # from it. Needs out/fecheck (scripts/build.sh), Fe 26.6.0, python3 with
 # Pillow, and ffmpeg. Set NO_RENDER=1 to capture only (render later with
 # `python3 scripts/render_demo.py docs/media/fecheck-demo.mp4 out/rec`).
+# The published video is narrated: `python3 scripts/narrate_demo.py out/rec
+# <piper-voice.onnx> docs/media/fecheck-demo.mp4` (see that script).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 FE="${FE:-fe}"; BIN="${BIN:-./out/fecheck}"

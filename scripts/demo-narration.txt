@@ -1,0 +1,24 @@
+# FeCheck 0.3.0 demo narration: one segment per scene, `[key] text`.
+# Keys match the scene marks in scripts/render_demo.py. Each clip starts
+# 0.3 s after its scene starts; scenes are held longer when a clip needs it.
+# scripts/narrate_demo.py speaks these lines (Fe is read "fee").
+
+[title] FeCheck: property-based and state-machine testing, written in Fe, for Fe.
+
+[version] Everything you see runs on the Fe twenty-six point six compiler.
+
+[run] We search a thousand random operation sequences against a permission system. Case forty-five fails, and FeCheck shrinks it from seven operations to four. The violation: a revoked agent is still allowed to execute.
+
+[regtest] The run also prints a regression test, ready to paste into fe test.
+
+[case] The shrunk failure is saved as a case file that pins the compiler and FeCheck versions.
+
+[replay] Replay that file against the same buggy system, and the failure is reproduced at operation four.
+
+[fixed] Replay it against the fixed system, and it is not reproduced. Exit code three is exactly what we expect.
+
+[native_evm] The same machine model runs on two backends. The native Fe build finds the failure. The case file is byte-identical to the one embedded in the contract test, and fe test replays it on the EVM: it reproduces on the buggy contract and passes on the fixed one. Then one million native cases run in about half a second.
+
+[erc20] On a real ERC-20 fixture from upstream Fe, a one-line mutant is caught by the same kind of model.
+
+[end] FeCheck. Find the failure, shrink the story, replay the proof. A hundred eighty-one EVM tests, plus native suites, on Fe twenty-six point six.

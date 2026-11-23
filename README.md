@@ -204,14 +204,19 @@ Reproduce with:
 ```
 
 `run` then prints a regression test that compiles as-is (see
-[below](#turning-a-failure-into-a-regression-test)). Watch the 95-second
-recording: [docs/media/fecheck-demo.mp4](docs/media/fecheck-demo.mp4)
+[below](#turning-a-failure-into-a-regression-test)). Watch the narrated
+102-second recording: [docs/media/fecheck-demo.mp4](docs/media/fecheck-demo.mp4)
 (find, shrink, replay against the buggy and fixed systems, the native case
 confirmed on the `fe test` EVM, 1,000,000 native cases, and the ERC-20
-mutant). It is rendered by `scripts/record-demo.sh` from real CLI output
-captured on x86-64 Linux with fecheck 0.3.0 and Fe 26.6.0 at `4d25819`
+mutant), with English subtitles as a soft track and in
+[docs/media/fecheck-demo.srt](docs/media/fecheck-demo.srt). It is rendered by
+`scripts/record-demo.sh` from real CLI output captured on x86-64 Linux with
+fecheck 0.3.0 and Fe 26.6.0 at `4d25819`
 ([CI run 45153531272](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45153531272));
-only the long regression test is trimmed, with a marker.
+only the long regression test is trimmed, with a marker. The voiceover
+([scripts/demo-narration.txt](scripts/demo-narration.txt)) is synthesized
+with Piper (`en_US-lessac-high`) and added by `scripts/narrate_demo.py`,
+which holds each scene until its line is spoken.
 
 ## Why
 

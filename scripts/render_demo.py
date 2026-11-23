@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Render a terminal-style demo video from real captured command output.
 
-    python3 scripts/render_demo.py docs/media/fecheck-demo.mp4 out/rec
+    python3 scripts/render_demo.py docs/media/fecheck-demo.mp4 out/rec [min.json]
+
+min.json (optional, written by scripts/narrate_demo.py) maps scene keys to a
+minimum scene length in seconds; a scene that would end sooner holds its last
+frame until then, so narration never has to be sped up. Scene starts are
+written to <rec>/scenes.txt and <rec>/scenes.json.
 
 out/rec holds what scripts/record-demo.sh captured: NN.cmd (the command
 line), NN.out (stdout+stderr), NN.rc (exit code) and NN.ms (wall clock).
@@ -10,6 +15,7 @@ non-captured text is captions (lines starting with `#`), the title and end
 cards, and a dim `[... N lines omitted ...]` marker where long output is
 trimmed for pacing. Trimming only ever drops lines; it never edits one.
 """
+import json
 import os
 import subprocess
 import sys
@@ -104,8 +110,10 @@ def is_key(line):
 
 
 class Video:
-    def __init__(self, out, title):
+    def __init__(self, out, title, mins=None):
         self.title = title
+        self.mins = mins or {}
+        self.last = None
         self.p = subprocess.Popen(
             ["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
              "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-c:v", "libx264",
@@ -114,10 +122,21 @@ class Video:
         self.n = 0
         self.marks = []
 
-    def mark(self, name):
-        self.marks.append((self.n / FPS, name))
+    def pad(self):
+        """Hold the previous scene's last frame up to its minimum length."""
+        if not self.marks or self.last is None:
+            return
+        start, key, _ = self.marks[-1]
+        need = int(round((start + self.mins.get(key, 0)) * FPS)) - self.n
+        if need > 0:
+            self.emit(self.last, frames=need)
+
+    def mark(self, key, name):
+        self.pad()
+        self.marks.append((self.n / FPS, key, name))
 
     def emit(self, img, secs=None, frames=None):
+        self.last = img
         k = frames if frames is not None else max(1, int(round(secs * FPS)))
         b = img.tobytes()
         for _ in range(k):
@@ -125,6 +144,7 @@ class Video:
         self.n += k
 
     def close(self):
+        self.pad()
         self.p.stdin.close()
         return self.p.wait()
 
@@ -214,29 +234,30 @@ def trim_run(out):
     return first, rest
 
 
-def main(dst, rec):
+def main(dst, rec, mins_path=None):
+    mins = json.load(open(mins_path)) if mins_path else {}
     s = {k: load(rec, k) for k in ("01", "02", "03", "04", "05", "06", "07")}
     fe_ver = s["01"]["out"][0].split(" (")[0] if s["01"]["out"] else "fe"
     fc = next((ln for ln in s["03"]["out"] if ln.startswith("fecheck ")), "fecheck")
     sha = open(os.path.join(rec, "sha")).read().strip() if os.path.exists(os.path.join(rec, "sha")) else ""
     title = f"{fc}  ·  {fe_ver}  ·  real captured output" + (f"  ·  {sha}" if sha else "")
-    v = Video(dst, title)
+    v = Video(dst, title, mins)
 
-    v.mark("Title card")
+    v.mark("title", "Title card")
     v.emit(v.card([("FeCheck", BIG, CYAN, 84),
                    ("Property-based testing for Fe", MID, FG, 56),
                    ("Find the failure. Shrink the story. Replay the proof.", MID, CAPC, 60),
                    (f"{fc}  ·  {fe_ver}", SMALL, DIM, 30)]), 4.0)
 
-    v.mark("fe --version")
+    v.mark("version", "fe --version")
     scene(v, "# The compiler: Fe 26.6.0", s["01"], hold=1.8)
 
-    v.mark("fecheck run permissions")
+    v.mark("run", "fecheck run permissions")
     first, rest = trim_run(s["02"]["out"])
     lines = scene(v, "# 1. Search 1,000 random operation sequences against a permission system (exit 1 = failure found)",
                   s["02"], show=first, hold=4.0)
     if rest:
-        v.mark("regression test printed by run")
+        v.mark("regtest", "regression test printed by run")
         HEAD, TAIL = 7, 5
         if len(rest) > HEAD + TAIL + 1:
             body = [("out", ln) for ln in rest[:HEAD]]
@@ -253,15 +274,15 @@ def main(dst, rec):
                 v.emit(v.term(lines), 0.8)
         v.emit(v.term(lines), 4.0)
 
-    v.mark("saved case header")
+    v.mark("case", "saved case header")
     lines = scene(v, "# 2. The saved case pins the compiler and FeCheck versions", s["03"], hold=2.6)
 
-    v.mark("replay (buggy)")
+    v.mark("replay", "replay (buggy)")
     lines = scene(v, "# 3. Replay it against the same buggy system", s["04"], hold=3.0)
-    v.mark("replay --against permissions-fixed")
+    v.mark("fixed", "replay --against permissions-fixed")
     lines = scene(v, "# 4. ... and against the fixed system (exit 3 = not reproduced)", s["05"], hold=3.5)
 
-    v.mark("native-to-EVM")
+    v.mark("native_evm", "native-to-EVM")
     out6 = s["06"]["out"]
     show6 = [("out", ln) for ln in out6]
     if len(show6) > ROWS - 4:
@@ -271,21 +292,25 @@ def main(dst, rec):
     scene(v, "# 5. Found natively, confirmed on the fe test EVM, then 1,000,000 native cases",
           s["06"], show=show6, line_frames=6, hold=5.0)
 
-    v.mark("erc20 mutant")
+    v.mark("erc20", "erc20 mutant")
     scene(v, "# 6. Demo E: a one-line ERC-20 mutant is caught (these tests pass only if it is)",
           s["07"], hold=3.5)
 
-    v.mark("End card")
+    v.mark("end", "End card")
     v.emit(v.card([("Found. Shrunk. Replayed. Confirmed on the EVM.", MID, GREEN, 70),
                    ("github.com/Xuefeng-Zhu/fecheck", BIG, CYAN, 80),
                    ("181 EVM tests + native suites  ·  Fe 26.6.0", MID, FG, 50)]), 5.0)
     rc = v.close()
     with open(os.path.join(rec, "scenes.txt"), "w") as f:
-        for t, name in v.marks:
+        for t, _, name in v.marks:
             f.write(f"{int(t // 60)}:{t % 60:05.2f}  {name}\n")
         f.write(f"total {v.n / FPS:.2f} s\n")
+    with open(os.path.join(rec, "scenes.json"), "w") as f:
+        json.dump({"scenes": [{"key": k, "name": nm, "start": round(t, 3)} for t, k, nm in v.marks],
+                   "total": round(v.n / FPS, 3)}, f, indent=1)
     sys.exit(rc)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "out/rec")
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "out/rec",
+         sys.argv[3] if len(sys.argv) > 3 else None)

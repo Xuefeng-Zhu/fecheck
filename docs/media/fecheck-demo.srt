@@ -1,0 +1,40 @@
+1
+00:00:00,300 --> 00:00:05,234
+FeCheck: property-based and state-machine testing, written in Fe, for Fe.
+
+2
+00:00:06,133 --> 00:00:09,813
+Everything you see runs on the Fe twenty-six point six compiler.
+
+3
+00:00:10,733 --> 00:00:23,005
+We search a thousand random operation sequences against a permission system. Case forty-five fails, and FeCheck shrinks it from seven operations to four. The violation: a revoked agent is still allowed to execute.
+
+4
+00:00:23,933 --> 00:00:27,950
+The run also prints a regression test, ready to paste into fe test.
+
+5
+00:00:31,433 --> 00:00:36,286
+The shrunk failure is saved as a case file that pins the compiler and FeCheck versions.
+
+6
+00:00:38,967 --> 00:00:44,447
+Replay that file against the same buggy system, and the failure is reproduced at operation four.
+
+7
+00:00:49,600 --> 00:00:56,294
+Replay it against the fixed system, and it is not reproduced. Exit code three is exactly what we expect.
+
+8
+00:01:00,167 --> 00:01:19,156
+The same machine model runs on two backends. The native Fe build finds the failure. The case file is byte-identical to the one embedded in the contract test, and fe test replays it on the EVM: it reproduces on the buggy contract and passes on the fixed one. Then one million native cases run in about half a second.
+
+9
+00:01:20,500 --> 00:01:26,700
+On a real ERC-20 fixture from upstream Fe, a one-line mutant is caught by the same kind of model.
+
+10
+00:01:31,933 --> 00:01:41,837
+FeCheck. Find the failure, shrink the story, replay the proof. A hundred eighty-one EVM tests, plus native suites, on Fe twenty-six point six.
+
