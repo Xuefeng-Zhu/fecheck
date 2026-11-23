@@ -9,10 +9,13 @@ use ingot::gen::{Gen, uint_in}
 use ingot::runner::{Config, check}
 use ingot::machine::{
     StateMachine,
+    EffectfulMachine,
     Steps,
     steps,
     run_steps,
     run_traced,
+    run_steps_with,
+    run_traced_with,
     NO_STEP,
     POSTCONDITION_MISMATCH,
     MAX_STEPS,
@@ -560,4 +563,134 @@ fn steps_settings_are_validated() {
     assert!(steps(MAX_STEPS + 1, 12).problem() == STEPS_TOO_MANY)
     assert!(steps(1, 1).problem() == 0)
     assert!(steps(MAX_STEPS, 12).problem() == 0)
+}
+
+// The same counter as an EffectfulMachine: its value lives in an effect,
+// the way a deployed contract's state lives in the EVM.
+struct Ledger { value: u64, sut_calls: u64, resets: u64 }
+
+struct EffCounter { buggy: bool }
+impl Copy for EffCounter {}
+
+impl EffectfulMachine for EffCounter {
+    type Cmd = CounterCmd
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+    type Env = Ledger
+
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> u64 uses (env: mut Ledger) {
+        env.value = 0
+        env.resets += 1
+        env.resets
+    }
+    fn gen_cmd(self, _ src: mut Source, _ model: u64) -> CounterCmd {
+        if src.draw_bool() {
+            CounterCmd::Add { n: uint_in(0, 100).generate(mut src) }
+        } else {
+            CounterCmd::Inc
+        }
+    }
+    fn precondition(self, _ model: u64, _ cmd: CounterCmd) -> bool {
+        true
+    }
+    fn run_model(self, _ model: mut u64, _ cmd: CounterCmd) -> u64 {
+        match cmd {
+            CounterCmd::Inc => {
+                model += 1
+            },
+            CounterCmd::Add { n } => {
+                model += n
+            },
+        }
+        model
+    }
+    fn run_sut(self, _ sut: mut u64, _ cmd: CounterCmd) -> u64
+    uses (env: mut Ledger)
+    {
+        env.sut_calls += 1
+        match cmd {
+            CounterCmd::Inc => {
+                env.value += 1
+            },
+            CounterCmd::Add { n } => {
+                if self.buggy && n > 50 {
+                    env.value += n - 1
+                } else {
+                    env.value += n
+                }
+            },
+        }
+        env.value
+    }
+    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict uses (env: mut Ledger) {
+        // The handle from new_sut must be the current run's.
+        if sut != env.resets {
+            Verdict::Fail { code: 77 }
+        } else {
+            Verdict::Pass
+        }
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "counter diverged")
+    }
+}
+
+#[test]
+fn effectful_machine_finds_and_shrinks() {
+    var ledger = Ledger { value: 0, sut_calls: 0, resets: 0 }
+    let report = with (ledger) {
+        check(
+            |src: mut Source| run_steps_with(EffCounter { buggy: true }, mut src, steps(30, 8)),
+            Config::new(seed: 1, cases: 100),
+        )
+    }
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == POSTCONDITION_MISMATCH)
+    assert!(ledger.resets > 1)
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = with (ledger) {
+        run_traced_with(EffCounter { buggy: true }, mut src, steps(30, 8))
+    }
+    assert!(trace.len() == 1)
+    assert!(trace.steps[0].command == "Add(51)")
+    assert!(trace.steps[0].expected == "51")
+    assert!(trace.steps[0].actual == "50")
+}
+
+#[test]
+fn effectful_and_pure_engines_agree() {
+    // Both loops must read the same choices and produce the same trace.
+    var ledger = Ledger { value: 0, sut_calls: 0, resets: 0 }
+    var seed: u64 = 0
+    var executed: u64 = 0
+    while seed < 60 {
+        var a = Source::random(seed, 4096)
+        var b = Source::random(seed, 4096)
+        let pure = run_traced(buggy(), mut a, steps(20, 6))
+        let calls_before = ledger.sut_calls
+        let eff = with (ledger) {
+            run_traced_with(EffCounter { buggy: true }, mut b, steps(20, 6))
+        }
+        assert!(same_choices(a.into_choices(), b.into_choices()))
+        assert!(pure.len() == eff.len())
+        assert!(pure.executed == eff.executed)
+        assert!(pure.failed_step == eff.failed_step)
+        assert!(pure.verdict.code() == eff.verdict.code())
+        assert!(ledger.sut_calls - calls_before == eff.executed)
+        var i: usize = 0
+        while i < pure.steps.len() {
+            assert!(pure.steps[i].command == eff.steps[i].command)
+            assert!(pure.steps[i].expected == eff.steps[i].expected)
+            assert!(pure.steps[i].actual == eff.steps[i].actual)
+            i += 1
+        }
+        executed += eff.executed
+        seed += 1
+    }
+    assert!(executed > 0)
+    assert!(ledger.resets == 60)
 }

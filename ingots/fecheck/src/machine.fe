@@ -227,3 +227,144 @@ fn execute<M: StateMachine>(
     trace.verdict = verdict
     verdict
 }
+
+/// A state machine whose system under test needs an effect, such as a
+/// contract deployed in the `fe test` EVM (`type Env = Evm`).
+///
+/// It is `StateMachine` with three methods that run with `env`: creating the
+/// SUT, applying a command to it, and checking the invariant (which may need
+/// to query the SUT). The model side stays pure. Run it with
+/// `run_steps_with` or `run_traced_with` from a test that has the effect in
+/// scope, usually inside a `check` closure:
+///
+/// ```fe
+/// #[test]
+/// fn registry() uses (evm: mut Evm) {
+///     let r = check(|src: mut Source| run_steps_with(RegistryMachine {}, mut src, steps(20, 8)),
+///                   Config::new(seed: 1, cases: 200))
+///     assert!(r.passed())
+/// }
+/// ```
+///
+/// Fe 26.6.0 rejects a generic impl with bounds on its parameters for a trait
+/// like this one (error 6-0009, fixed upstream in 26.7.0), so pure machines
+/// keep their own trait instead of an adapter over this one.
+pub trait EffectfulMachine {
+    type Cmd: Copy + Display
+    type Obs: Copy + Eq + Display
+    type Model
+    type Sut
+    /// The effect the SUT runs with, such as `std::evm::Evm`.
+    type Env
+
+    fn new_model(self) -> Self::Model
+    fn new_sut(self) -> Self::Sut uses (env: mut Self::Env)
+    fn gen_cmd(self, _ src: mut Source, _ model: Self::Model) -> Self::Cmd
+    fn precondition(self, _ model: Self::Model, _ cmd: Self::Cmd) -> bool
+    fn run_model(self, _ model: mut Self::Model, _ cmd: Self::Cmd) -> Self::Obs
+    fn run_sut(self, _ sut: mut Self::Sut, _ cmd: Self::Cmd) -> Self::Obs
+    uses (env: mut Self::Env)
+    fn invariant(self, _ model: Self::Model, _ sut: Self::Sut) -> Verdict
+    uses (env: mut Self::Env)
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer)
+}
+
+/// `run_steps` for an `EffectfulMachine`.
+pub fn run_steps_with<M: EffectfulMachine>(
+    _ machine: M,
+    _ src: mut Source,
+    _ steps: Steps,
+) -> Verdict
+uses (env: mut M::Env)
+{
+    var trace = Trace::new()
+    execute_with(machine, mut src, steps, mut trace, false)
+}
+
+/// `run_traced` for an `EffectfulMachine`.
+pub fn run_traced_with<M: EffectfulMachine>(
+    _ machine: M,
+    _ src: mut Source,
+    _ steps: Steps,
+) -> Trace
+uses (env: mut M::Env)
+{
+    var trace = Trace::new()
+    let _ = execute_with(machine, mut src, steps, mut trace, true)
+    trace
+}
+
+// Same loop as `execute`, with the SUT calls running under `env`. Kept as a
+// copy rather than an adapter because of the 26.6.0 limit noted above; the
+// two must stay in step (tests_machine checks they agree on a pure machine).
+fn execute_with<M: EffectfulMachine>(
+    _ machine: M,
+    _ src: mut Source,
+    _ steps: Steps,
+    _ trace: mut Trace,
+    _ record: bool,
+) -> Verdict
+uses (env: mut M::Env)
+{
+    var model = machine.new_model()
+    var sut = machine.new_sut()
+    var index: u64 = 0
+    var verdict = Verdict::Pass
+    while index < steps.max {
+        if !src.draw_weighted(steps.mean, steps.mean + 1) {
+            break
+        }
+        let cmd = machine.gen_cmd(mut src, model)
+        if !machine.precondition(model, cmd) {
+            trace.skipped += 1
+            if record {
+                trace
+                    .steps
+                    .push(
+                        Step {
+                            index,
+                            command: format!(cmd),
+                            skipped: true,
+                            expected: MemBuffer::new(0),
+                            actual: MemBuffer::new(0),
+                            verdict: Verdict::Pass,
+                        },
+                    )
+            }
+            index += 1
+            continue
+        }
+        let expected = machine.run_model(mut model, cmd)
+        let actual = machine.run_sut(mut sut, cmd)
+        trace.executed += 1
+        var step_verdict = machine.invariant(model, sut)
+        if step_verdict.is_pass() && expected != actual {
+            step_verdict = Verdict::Fail { code: POSTCONDITION_MISMATCH }
+        }
+        if record {
+            trace
+                .steps
+                .push(
+                    Step {
+                        index,
+                        command: format!(cmd),
+                        skipped: false,
+                        expected: format!(expected),
+                        actual: format!(actual),
+                        verdict: step_verdict,
+                    },
+                )
+        }
+        if !step_verdict.is_pass() {
+            verdict = step_verdict
+            trace.failed_step = index
+            if record {
+                machine.describe_failure(step_verdict.code(), mut trace.explanation)
+            }
+            break
+        }
+        index += 1
+    }
+    trace.verdict = verdict
+    verdict
+}

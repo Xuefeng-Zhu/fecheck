@@ -18,7 +18,7 @@ a one-line mutant is caught).
 ## Fe-specific highlight
 
 Determinism is enforced by Fe's effect system. The FeCheck core declares no
-effects, so the compiler proves no generator, shrinker or replay can touch
+concrete effects (it only forwards the test's), so the compiler proves no generator, shrinker or replay can touch
 the clock, the filesystem or host randomness. The engine is generic over the
 test's effects (`uses F::E`), so the very same `check` and shrinker that test
 a pure ring buffer also drive a deployed contract through `uses (evm: mut

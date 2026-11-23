@@ -132,13 +132,17 @@ panic and never a pass.
 
 ## Effects as a design tool
 
-* `ingots/fecheck` declares no effects anywhere. The compiler therefore
+* `ingots/fecheck` declares no concrete effects. The only `uses` clauses in
+  it forward an effect the test supplies (`F::E`, `M::Env`). The compiler therefore
   guarantees that no generator, shrinker or replay can read the clock, the
   filesystem, the environment or host randomness: determinism is enforced by
   the type system, not by convention.
 * The engine is generic over the test's effects (`uses F::E`). The same
   `check` and `shrink` drive a pure library (Demos A/B) and a deployed EVM
   contract (Demo C, `uses (evm: mut Evm)`), with no adapter layer.
+* `EffectfulMachine` puts the effect in the trait (`type Env`, and
+  `run_sut(..) uses (env: mut Self::Env)`), so a model-based contract test
+  is a trait impl rather than a hand-written loop.
 * Only `cli/` declares `Stdout`, `Args` and `Fs`, so I/O is confined to one
   file.
 

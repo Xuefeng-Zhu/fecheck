@@ -99,8 +99,11 @@ fn meter_matches_its_model() {
 }
 ```
 
-To test a contract, see Demo C: the engine forwards your test's effects, so
-each case can deploy a fresh contract (`uses (evm: mut Evm)`).
+To test a contract, implement `EffectfulMachine` instead: the same methods,
+plus `type Env = Evm`, with `new_sut` and `run_sut` declared
+`uses (env: mut Evm)`. Run it with `run_steps_with` from a test that
+`uses (evm: mut Evm)`; each case deploys a fresh contract. See
+`examples/contract/src/machine_tests.fe`.
 
 ## 7. Run it in CI
 

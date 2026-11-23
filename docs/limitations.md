@@ -23,10 +23,14 @@ Living list. Items are honest constraints of the current implementation.
   being classified as `Error`. Tests should detect such conditions and
   return `Verdict::Error { code }`. On the EVM backend a revert inside an
   `evm.call` likewise aborts the test.
-* The `StateMachine` trait methods declare no effects, so a machine whose SUT
-  needs an effect (such as `Evm`) is written as a test closure (Demo C)
-  rather than a `StateMachine` impl. A trait-level effect parameter is the
-  natural follow-up.
+* A machine whose SUT needs an effect (such as `Evm`) implements
+  `EffectfulMachine`, a separate trait from `StateMachine`. One trait with an
+  adapter would be cleaner, but Fe 26.6.0 rejects the generic adapter impl
+  (error 6-0009, fixed upstream in 26.7.0), so the two executors are kept as
+  copies; `effectful_and_pure_engines_agree` checks they produce identical
+  traces. The CLI and `.case` replay (`replay_machine`) cover pure machines
+  only, since the native CLI has no EVM; an effectful case replays inside
+  `fe test` with `run_traced_with`.
 * Command observations are compared with `Eq`; there is no generic diffing of
   model and SUT state.
 

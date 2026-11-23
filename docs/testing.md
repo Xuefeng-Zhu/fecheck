@@ -28,10 +28,10 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|
-| `ingots/fecheck` (core) | 50 passed, 0 failed | 50 passed, 0 failed (CI) |
+| `ingots/fecheck` (core) | 52 passed, 0 failed | 52 passed, 0 failed (CI) |
 | `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
 | `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
-| `examples/contract` (Demo C) | 5 passed | n/a (EVM contract) |
+| `examples/contract` (Demo C, closure and `EffectfulMachine`) | 8 passed | n/a (EVM contract) |
 | `examples/erc20` (Demo E, 1,000 sequences + mutant check) | 6 passed | n/a (EVM contract) |
 | `examples/differential` (Demo D, 110,000 cases) | 29 passed | 29 passed (CI) |
 | `examples/differential_deep` (Demo D, 11,000,000 cases) | n/a (exceeds the EVM test gas cap) | 29 passed (CI) |

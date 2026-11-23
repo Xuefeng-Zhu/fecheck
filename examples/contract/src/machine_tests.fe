@@ -1,0 +1,203 @@
+// Demo C again, written as an `EffectfulMachine` instead of a hand-rolled
+// test closure. The SUT is the deployed contract's address, and `new_sut`
+// and `run_sut` run with the `fe test` EVM (`type Env = Evm`). The engine
+// does the loop, the precondition, the postcondition check and the trace.
+
+use core::MemBuffer
+use std::evm::Evm
+use std::io::Display
+use fecheck::{
+    Source,
+    Verdict,
+    Config,
+    check,
+    choices_from,
+    copy_choices,
+    EffectfulMachine,
+    steps,
+    run_steps_with,
+    run_traced_with,
+    POSTCONDITION_MISMATCH,
+}
+use ingot::{CachedRegistry, FixedRegistry, PermissionMsg}
+
+pub enum RegCmd {
+    Grant { pub agent: u64 },
+    Revoke { pub agent: u64 },
+    Execute { pub agent: u64 },
+}
+impl Copy for RegCmd {}
+impl Display for RegCmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            RegCmd::Grant { agent } => write!(mut out, "grant(", agent, ")"),
+            RegCmd::Revoke { agent } => write!(mut out, "revoke(", agent, ")"),
+            RegCmd::Execute { agent } => write!(mut out, "execute(", agent, ")"),
+        }
+    }
+}
+
+/// What a transaction returned: 0 false, 1 true, 2 nothing.
+const NONE: u64 = 2
+
+fn bit(_ b: bool) -> u64 {
+    if b { 1 } else { 0 }
+}
+
+fn slot(_ agent: u64) -> usize {
+    let i: usize = agent.downcast_saturate()
+    i
+}
+
+/// Which registry to deploy: the cached one with the bug, or the fix.
+pub struct RegistryMachine { pub fixed: bool }
+impl Copy for RegistryMachine {}
+
+impl EffectfulMachine for RegistryMachine {
+    type Cmd = RegCmd
+    type Obs = u64
+    type Model = [bool; 4]
+    type Sut = Address
+    type Env = Evm
+
+    fn new_model(self) -> [bool; 4] {
+        [false; 4]
+    }
+
+    fn new_sut(self) -> Address uses (env: mut Evm) {
+        if self.fixed {
+            env.create<FixedRegistry>(value: Wei::zero(), args: ())
+        } else {
+            env.create<CachedRegistry>(value: Wei::zero(), args: ())
+        }
+    }
+
+    // Same choices as the closure version (kind, then agent), so the two
+    // read each other's case files.
+    fn gen_cmd(self, _ src: mut Source, _ model: [bool; 4]) -> RegCmd {
+        let kind = src.draw(2)
+        let agent = src.draw(3)
+        if kind == 0 {
+            RegCmd::Grant { agent }
+        } else if kind == 1 {
+            RegCmd::Revoke { agent }
+        } else {
+            RegCmd::Execute { agent }
+        }
+    }
+
+    /// Only an existing grant can be revoked.
+    fn precondition(self, _ model: [bool; 4], _ cmd: RegCmd) -> bool {
+        match cmd {
+            RegCmd::Revoke { agent } => model[slot(agent)],
+            _ => true,
+        }
+    }
+
+    fn run_model(self, _ model: mut [bool; 4], _ cmd: RegCmd) -> u64 {
+        match cmd {
+            RegCmd::Grant { agent } => {
+                model[slot(agent)] = true
+                NONE
+            },
+            RegCmd::Revoke { agent } => {
+                model[slot(agent)] = false
+                NONE
+            },
+            RegCmd::Execute { agent } => bit(model[slot(agent)]),
+        }
+    }
+
+    fn run_sut(self, _ sut: mut Address, _ cmd: RegCmd) -> u64 uses (env: mut Evm) {
+        match cmd {
+            RegCmd::Grant { agent } => {
+                env.call(
+                    addr: sut,
+                    gas: 200000,
+                    value: Wei::zero(),
+                    message: PermissionMsg::Grant { agent: agent as u256 },
+                )
+                NONE
+            },
+            RegCmd::Revoke { agent } => {
+                env.call(
+                    addr: sut,
+                    gas: 200000,
+                    value: Wei::zero(),
+                    message: PermissionMsg::Revoke { agent: agent as u256 },
+                )
+                NONE
+            },
+            RegCmd::Execute { agent } => {
+                let allowed: bool = env
+                    .call(
+                        addr: sut,
+                        gas: 200000,
+                        value: Wei::zero(),
+                        message: PermissionMsg::Execute { agent: agent as u256 },
+                    )
+                bit(allowed)
+            },
+        }
+    }
+
+    fn invariant(self, _ model: [bool; 4], _ sut: Address) -> Verdict
+    uses (env: mut Evm)
+    {
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(
+            mut out,
+            "execute() disagreed with the set of granted agents",
+        )
+    }
+}
+
+#[test]
+fn machine_finds_the_stale_cache() uses (evm: mut Evm) {
+    let report = check(
+        |src: mut Source| run_steps_with(RegistryMachine { fixed: false }, mut src, steps(30, 10)),
+        Config::new(seed: 12345, cases: 300),
+    )
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == POSTCONDITION_MISMATCH)
+
+    // The shrunk story: grant(a), execute(a), revoke(a), execute(a).
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced_with(RegistryMachine { fixed: false }, mut src, steps(30, 10))
+    assert!(trace.len() == 4)
+    assert!(trace.failed_step == 3)
+    assert!(trace.steps[3].expected == "0")
+    assert!(trace.steps[3].actual == "1")
+    assert!(
+        trace.explanation == "execute() disagreed with the set of granted agents",
+    )
+
+    // The same case passes on the fix.
+    var again = Source::replay(copy_choices(report.shrunk), 4096)
+    assert!(
+        run_steps_with(RegistryMachine { fixed: true }, mut again, steps(30, 10)).is_pass(),
+    )
+}
+
+#[test]
+fn machine_passes_the_fixed_registry() uses (evm: mut Evm) {
+    let report = check(
+        |src: mut Source| run_steps_with(RegistryMachine { fixed: true }, mut src, steps(30, 10)),
+        Config::new(seed: 12345, cases: 300),
+    )
+    assert!(report.passed())
+}
+
+/// The closure version's regression case replays unchanged on the machine.
+#[test]
+fn machine_reads_the_closure_case_file() uses (evm: mut Evm) {
+    let stale: [u64; 12] = [1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1]
+    var src = Source::replay(choices_from(stale), 4096)
+    let trace = run_traced_with(RegistryMachine { fixed: false }, mut src, steps(30, 10))
+    assert!(trace.failed_step == 3)
+    assert!(trace.steps[0].command == "grant(1)")
+    assert!(trace.steps[3].command == "execute(1)")
+}

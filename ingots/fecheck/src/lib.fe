@@ -32,12 +32,15 @@ pub use runner::{Config, Report, Status, check, run_random, run_choices}
 pub use shrink::{shrink, ShrinkResult, ShrinkStats}
 pub use machine::{
     StateMachine,
+    EffectfulMachine,
     Steps,
     Step,
     Trace,
     steps,
     run_steps,
     run_traced,
+    run_steps_with,
+    run_traced_with,
     POSTCONDITION_MISMATCH,
     NO_STEP,
     MAX_STEPS,

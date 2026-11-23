@@ -149,6 +149,7 @@ those tools.
 | `check(test, Config)` with `Passed` / `Failed` / `InvalidConfig` / `GaveUp` and `Fail` vs `Error` vs `Discard` verdicts | done |
 | Shrinker: run deletion, value minimisation (0 then binary search), pair lowering; failure-identity preserving; budgeted; deterministic | done |
 | `StateMachine` trait: model, SUT, command generation, preconditions, postconditions, invariants, traces | done |
+| `EffectfulMachine` trait: the same, with a SUT that runs under an effect such as `Evm` | done |
 | Versioned `.case` regression files (schema 2 records the generation settings; schema 1 still read), strict untrusted-input parser | done |
 | Replay that verifies the whole recorded trace, with outcomes `Reproduced` / `NoLongerFails` / `DifferentFailure` / `Invalid` / `Drift` | done |
 | JSON trace export | done (write-only) |
@@ -311,6 +312,35 @@ fn registry_never_lets_revoked_agents_execute() uses (evm: mut Evm) {
 Every case and every shrink candidate deploys a fresh contract
 ([examples/contract/src/tests.fe](examples/contract/src/tests.fe)).
 
+For a contract with a model, implement `fecheck::EffectfulMachine` instead of
+`StateMachine`. It is the same trait with one more associated type, `Env`,
+the effect the SUT runs with; `new_sut`, `run_sut` and `invariant` run with
+it, and the model stays pure. The engine then does the loop, preconditions,
+postconditions and traces for a deployed contract
+([examples/contract/src/machine_tests.fe](examples/contract/src/machine_tests.fe)):
+
+```fe
+impl EffectfulMachine for RegistryMachine {
+    type Sut = Address
+    type Env = Evm
+    fn new_sut(self) -> Address uses (env: mut Evm) {
+        env.create<CachedRegistry>(value: Wei::zero(), args: ())
+    }
+    fn run_sut(self, _ sut: mut Address, _ cmd: RegCmd) -> u64 uses (env: mut Evm) { .. }
+    // Cmd, Obs, Model and the other methods as in StateMachine
+}
+
+#[test]
+fn cached_registry_breaks_the_model() uses (evm: mut Evm) {
+    let report = check(|src: mut Source| run_steps_with(RegistryMachine {}, mut src, steps(30, 10)),
+                       Config::new(seed: 12345, cases: 300))
+    assert!(report.failed())   // grant, execute, revoke, execute
+}
+```
+
+On the cached registry this finds and shrinks the same four-transaction story
+as the closure version, and the two read each other's case files.
+
 ### Turning a failure into a regression test
 
 `fecheck run` prints a regression test for the bundled targets with the
@@ -358,11 +388,11 @@ ingots/fecheck/src/         the library (all Fe)
   gen.fe                      Gen trait and generators
   runner.fe                   Config, Report, check
   shrink.fe                   the shrinker
-  machine.fe                  StateMachine trait, executor, traces
+  machine.fe                  StateMachine and EffectfulMachine, executors, traces
   artifact.fe                 .case format: encoder and strict parser
   replay.fe                   replay and outcome classification
   json.fe                     JSON trace export
-  tests_*.fe                  50 tests
+  tests_*.fe                  52 tests
 examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
