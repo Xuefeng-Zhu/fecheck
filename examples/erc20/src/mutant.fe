@@ -1,0 +1,93 @@
+// MutantCoin: CoolCoin with one line removed (TransferFrom no longer spends
+// the allowance). It exists only to show that the ERC-20 model catches a
+// one-line bug and shrinks it; the test of CoolCoin itself is the real one.
+
+use std::evm::{Ctx, StorageMap}
+use super::coolcoin::{Erc20, Erc20Extended}
+
+struct MutantStore {
+    total_supply: u256,
+    balances: StorageMap<Address, u256>,
+    allowances: StorageMap<(Address, Address), u256>,
+}
+
+pub contract MutantCoin uses (ctx: Ctx) {
+    mut store: MutantStore,
+
+    init(initial_supply: u256, owner: Address)
+    uses (mut store)
+    {
+        if initial_supply > 0 {
+            store.total_supply = initial_supply
+            store.balances.set(key: owner, value: initial_supply)
+        }
+    }
+
+    recv Erc20 {
+        Name -> u256 {
+            0x436f6f6c436f696e
+        }
+        Symbol -> u256 {
+            0x434f4f4c
+        }
+        Decimals -> u8 {
+            18
+        }
+        TotalSupply -> u256 uses store {
+            store.total_supply
+        }
+        BalanceOf { account } -> u256 uses store {
+            store.balances.get(key: account)
+        }
+        Allowance { owner, spender } -> u256 uses store {
+            store.allowances.get(key: (owner, spender))
+        }
+
+        WhoAmI -> u256 uses ctx {
+            return ctx.caller().word()
+        }
+
+        Transfer { to, amount } -> bool uses (mut store, ctx) {
+            let sender = ctx.caller()
+            let sender_bal = store.balances.get(key: sender)
+            if sender_bal < amount {
+                return false
+            }
+            store.balances.set(key: sender, value: sender_bal - amount)
+            store.balances.set(key: to, value: store.balances.get(key: to) + amount)
+            return true
+        }
+
+        Approve { spender, amount } -> bool uses (mut store, ctx) {
+            let sender = ctx.caller()
+            store.allowances.set(key: (sender, spender), value: amount)
+            return true
+        }
+
+        TransferFrom { from, to, amount } -> bool
+        uses (mut store, ctx)
+        {
+            let spender = ctx.caller()
+            let allowed = store.allowances.get(key: (from, spender))
+            if allowed < amount {
+                return false
+            }
+            let from_bal = store.balances.get(key: from)
+            if from_bal < amount {
+                return false
+            }
+            // MUTATION: the allowance is not spent.
+            store.balances.set(key: from, value: from_bal - amount)
+            store.balances.set(key: to, value: store.balances.get(key: to) + amount)
+            return true
+        }
+    }
+
+    recv Erc20Extended {
+        Mint { to, amount } -> bool uses (mut store) {
+            store.total_supply += amount
+            store.balances.set(key: to, value: store.balances.get(key: to) + amount)
+            return true
+        }
+    }
+}

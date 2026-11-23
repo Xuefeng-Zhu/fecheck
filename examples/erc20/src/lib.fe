@@ -1,0 +1,5 @@
+// Demo E: model-based testing of an ERC-20 the Fe team wrote.
+
+pub use coolcoin::{CoolCoin, Erc20, Erc20Extended}
+pub use actor::{Actor, ActorMsg}
+pub use mutant::MutantCoin

@@ -1,0 +1,6 @@
+[ingot]
+name = "erc20"
+version = "0.1.0"
+
+[dependencies]
+fecheck = "../../ingots/fecheck"

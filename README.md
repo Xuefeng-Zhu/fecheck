@@ -80,6 +80,21 @@ No Fe bug turned up. The suite stays in CI as a regression net for the
 compiler and the core library, and it is the template for checking one Fe
 backend against another.
 
+## An ERC-20 we didn't write
+
+Demo E ([examples/erc20](examples/erc20)) model-tests CoolCoin, the ERC-20
+from the Fe compiler's own test suite, taken with its logic unchanged. Three
+`Actor` contracts hold tokens, so `transfer`, `approve` and `transferFrom`
+come from three real `msg.sender`s. Each generated sequence (up to 25
+transactions, amounts biased to exactly the balance or allowance and one
+more) runs on a fresh deployment. After every transaction the return value,
+all balances and allowances, and the total supply must match a plain-array
+model, and the balances must sum to the total supply.
+
+1,000 sequences pass. The same model catches a one-line mutant
+(`transferFrom` that never spends the allowance) and shrinks it to an
+allowance mismatch, so the check has teeth.
+
 ## The same idea from the CLI
 
 ```
@@ -142,6 +157,7 @@ those tools.
 | Demo B: bounded ring-buffer queue with a wrap-around bug | done |
 | Demo C: the permission bug in a deployed **EVM contract**, end to end with `scripts/contract-demo.sh` | done |
 | Demo D: differential properties for Fe's core arithmetic on both backends (`examples/differential`, native deep run in `examples/differential_deep`) | done, no divergence found |
+| Demo E: model-based test of the Fe test suite's ERC-20 (CoolCoin) with three holder contracts | done, 1,000 sequences pass; a one-line mutant is caught |
 | A stand-alone ingot using FeCheck as a dependency, tested from outside the repo | done (`examples/external`, `scripts/external-check.sh`) |
 | Web visualisation | not built (deliberately; see limitations) |
 
@@ -350,6 +366,7 @@ ingots/fecheck/src/         the library (all Fe)
 examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
+examples/erc20/             Demo E (Fe's own ERC-20 fixture vs an ERC-20 model)
 examples/differential/      Demo D (Fe core arithmetic vs references, both backends)
 examples/differential_deep/ Demo D at 100x the case count, native only
 cli/                        native `fecheck` executable (Fe)

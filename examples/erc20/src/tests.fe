@@ -1,0 +1,236 @@
+use std::evm::Evm
+use fecheck::{Source, Verdict, Config, check, ensure}
+use ingot::{CoolCoin, MutantCoin, Erc20, Erc20Extended, Actor, ActorMsg}
+
+// Failure codes.
+pub const RETURN_MISMATCH: u64 = 1
+pub const BALANCE_MISMATCH: u64 = 2
+pub const ALLOWANCE_MISMATCH: u64 = 3
+pub const SUPPLY_MISMATCH: u64 = 4
+pub const SUPPLY_NOT_SUM: u64 = 5
+
+pub const ACTORS: u64 = 3
+pub const INITIAL_SUPPLY: u256 = 1000
+
+/// The reference model: what an ERC-20 must hold, in plain arrays.
+struct Model { balances: [u256; 3], allowances: [u256; 9], supply: u256 }
+
+fn slot(_ owner: u64, _ spender: u64) -> usize {
+    let i: usize = (owner * ACTORS + spender).downcast_saturate()
+    i
+}
+
+fn idx(_ i: u64) -> usize {
+    let r: usize = i.downcast_saturate()
+    r
+}
+
+/// An amount biased toward the interesting edges: 0, exactly the available
+/// balance or allowance, one more than it, or anything up to 1500.
+fn amount(_ src: mut Source, _ available: u256) -> u256 {
+    let shape = src.draw(3)
+    if shape == 0 {
+        return src.draw(1500) as u256
+    }
+    if shape == 1 {
+        return available
+    }
+    if shape == 2 {
+        return available + 1
+    }
+    0
+}
+
+/// One generated sequence of up to 25 transactions against a fresh token,
+/// held by three Actor contracts. After every transaction the token's return
+/// value, every balance and allowance, and the total supply are compared
+/// with the model, and the balances must sum to the total supply.
+fn erc20_case<C: std::evm::Contract<InitArgs = (u256, Address)>>(_ src: mut Source) -> Verdict
+uses (evm: mut Evm)
+{
+    let a0 = evm.create<Actor>(value: Wei::zero(), args: ())
+    let a1 = evm.create<Actor>(value: Wei::zero(), args: ())
+    let a2 = evm.create<Actor>(value: Wei::zero(), args: ())
+    let actors: [Address; 3] = [a0, a1, a2]
+    let token = evm.create<C>(value: Wei::zero(), args: (INITIAL_SUPPLY, a0))
+    var m = Model { balances: [INITIAL_SUPPLY, 0, 0], allowances: [0; 9], supply: INITIAL_SUPPLY }
+
+    var step: u64 = 0
+    while step < 25 {
+        if !src.draw_weighted(12, 13) {
+            break
+        }
+        let kind = src.draw(3)
+        let i = src.draw(ACTORS - 1)
+        let j = src.draw(ACTORS - 1)
+        if kind == 0 {
+            // actor i transfers to actor j
+            let amt = amount(mut src, m.balances[idx(i)])
+            let got: bool = evm
+                .call(
+                    addr: actors[idx(i)],
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: ActorMsg::DoTransfer { token, to: actors[idx(j)], amount: amt },
+                )
+            let want = m.balances[idx(i)] >= amt
+            if want {
+                m.balances[idx(i)] = m.balances[idx(i)] - amt
+                m.balances[idx(j)] = m.balances[idx(j)] + amt
+            }
+            if got != want {
+                return ensure(false, RETURN_MISMATCH)
+            }
+        } else if kind == 1 {
+            // actor i approves actor j
+            let amt = amount(mut src, m.balances[idx(i)])
+            let got: bool = evm
+                .call(
+                    addr: actors[idx(i)],
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: ActorMsg::DoApprove { token, spender: actors[idx(j)], amount: amt },
+                )
+            m.allowances[slot(i, j)] = amt
+            if !got {
+                return ensure(false, RETURN_MISMATCH)
+            }
+        } else if kind == 2 {
+            // actor k moves i's tokens to j under k's allowance
+            let k = src.draw(ACTORS - 1)
+            let allowed = m.allowances[slot(i, k)]
+            let amt = amount(mut src, allowed)
+            let got: bool = evm
+                .call(
+                    addr: actors[idx(k)],
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: ActorMsg::DoTransferFrom {
+                        token,
+                        from: actors[idx(i)],
+                        to: actors[idx(j)],
+                        amount: amt,
+                    },
+                )
+            let want = allowed >= amt && m.balances[idx(i)] >= amt
+            if want {
+                m.allowances[slot(i, k)] = allowed - amt
+                m.balances[idx(i)] = m.balances[idx(i)] - amt
+                m.balances[idx(j)] = m.balances[idx(j)] + amt
+            }
+            if got != want {
+                return ensure(false, RETURN_MISMATCH)
+            }
+        } else {
+            // anyone may mint (CoolCoin's Mint has no access control)
+            let amt = src.draw(1500) as u256
+            let got: bool = evm
+                .call(
+                    addr: token,
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: Erc20Extended::Mint { to: actors[idx(j)], amount: amt },
+                )
+            m.supply = m.supply + amt
+            m.balances[idx(j)] = m.balances[idx(j)] + amt
+            if !got {
+                return ensure(false, RETURN_MISMATCH)
+            }
+        }
+
+        // Check the whole observable state against the model.
+        var sum: u256 = 0
+        var o: u64 = 0
+        while o < ACTORS {
+            let bal: u256 = evm
+                .call(
+                    addr: token,
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: Erc20::BalanceOf { account: actors[idx(o)] },
+                )
+            if bal != m.balances[idx(o)] {
+                return ensure(false, BALANCE_MISMATCH)
+            }
+            sum = sum + bal
+            var s: u64 = 0
+            while s < ACTORS {
+                let allow: u256 = evm
+                    .call(
+                        addr: token,
+                        gas: 1000000,
+                        value: Wei::zero(),
+                        message: Erc20::Allowance {
+                            owner: actors[idx(o)],
+                            spender: actors[idx(s)],
+                        },
+                    )
+                if allow != m.allowances[slot(o, s)] {
+                    return ensure(false, ALLOWANCE_MISMATCH)
+                }
+                s += 1
+            }
+            o += 1
+        }
+        let supply: u256 = evm
+            .call(
+                addr: token,
+                gas: 1000000,
+                value: Wei::zero(),
+                message: Erc20::TotalSupply {},
+            )
+        if supply != m.supply {
+            return ensure(false, SUPPLY_MISMATCH)
+        }
+        if sum != supply {
+            return ensure(false, SUPPLY_NOT_SUM)
+        }
+        step += 1
+    }
+    Verdict::Pass
+}
+
+/// 200 sequences under `seed`. Five seeds give 1,000 sequences; each test
+/// has its own gas budget in the `fe test` EVM.
+fn coolcoin_passes(_ seed: u64) -> bool uses (evm: mut Evm) {
+    check(
+        |src: mut Source| erc20_case<CoolCoin>(mut src),
+        Config::new(seed, cases: 200),
+    ).passed()
+}
+
+#[test]
+fn coolcoin_matches_the_erc20_model_seed_1() uses (evm: mut Evm) {
+    assert!(coolcoin_passes(1))
+}
+
+#[test]
+fn coolcoin_matches_the_erc20_model_seed_2() uses (evm: mut Evm) {
+    assert!(coolcoin_passes(2))
+}
+
+#[test]
+fn coolcoin_matches_the_erc20_model_seed_3() uses (evm: mut Evm) {
+    assert!(coolcoin_passes(3))
+}
+
+#[test]
+fn coolcoin_matches_the_erc20_model_seed_4() uses (evm: mut Evm) {
+    assert!(coolcoin_passes(4))
+}
+
+#[test]
+fn coolcoin_matches_the_erc20_model_seed_5() uses (evm: mut Evm) {
+    assert!(coolcoin_passes(5))
+}
+
+#[test]
+fn the_model_catches_a_one_line_mutant() uses (evm: mut Evm) {
+    let report = check(
+        |src: mut Source| erc20_case<MutantCoin>(mut src),
+        Config::new(seed: 2026, cases: 200),
+    )
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == ALLOWANCE_MISMATCH)
+    assert!(report.shrunk.len() <= report.original.len())
+}

@@ -1,0 +1,50 @@
+// A token holder with its own address. The `fe test` EVM always calls from
+// the test runner, so each Actor contract forwards calls to the token and
+// becomes `msg.sender` for them: three Actors are three independent holders.
+
+use std::evm::Call
+use super::coolcoin::Erc20
+
+pub msg ActorMsg {
+    #[selector = 0x01]
+    DoTransfer { token: Address, to: Address, amount: u256 } -> bool,
+    #[selector = 0x02]
+    DoApprove { token: Address, spender: Address, amount: u256 } -> bool,
+    #[selector = 0x03]
+    DoTransferFrom { token: Address, from: Address, to: Address, amount: u256 } -> bool,
+}
+
+pub contract Actor uses (call: mut Call) {
+    recv ActorMsg {
+        DoTransfer { token, to, amount } -> bool uses (mut call) {
+            call.call(
+                addr: token,
+                gas: 200000,
+                value: Wei::zero(),
+                message: Erc20::Transfer { to, amount },
+            )
+        }
+
+        DoApprove { token, spender, amount } -> bool
+        uses (mut call)
+        {
+            call.call(
+                addr: token,
+                gas: 200000,
+                value: Wei::zero(),
+                message: Erc20::Approve { spender, amount },
+            )
+        }
+
+        DoTransferFrom { token, from, to, amount } -> bool
+        uses (mut call)
+        {
+            call.call(
+                addr: token,
+                gas: 200000,
+                value: Wei::zero(),
+                message: Erc20::TransferFrom { from, to, amount },
+            )
+        }
+    }
+}

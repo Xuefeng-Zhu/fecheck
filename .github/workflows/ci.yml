@@ -22,7 +22,7 @@ jobs:
           echo "$HOME/.fe/bin" >> "$GITHUB_PATH"
       - run: fe --version
       - name: Format check
-        run: for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/external cli; do fe fmt --check "$d"; done
+        run: for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/external cli; do fe fmt --check "$d"; done
       - name: Tests (EVM + native), external ingot, EVM contract demo, CLI build and end-to-end checks
         run: ./scripts/test.sh
       - name: EVM contract counterexample (Demo C)
