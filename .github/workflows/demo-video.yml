@@ -2,8 +2,6 @@ name: Demo video
 
 on:
   workflow_dispatch:
-  push:
-    branches: [demo-video]
 
 permissions:
   contents: read

@@ -204,10 +204,14 @@ Reproduce with:
 ```
 
 `run` then prints a regression test that compiles as-is (see
-[below](#turning-a-failure-into-a-regression-test)). Watch the 66-second
+[below](#turning-a-failure-into-a-regression-test)). Watch the 95-second
 recording: [docs/media/fecheck-demo.mp4](docs/media/fecheck-demo.mp4)
-(rendered from real CLI output by `scripts/record-demo.sh`; recorded with
-0.1.0, before the replay fixes in 0.2.0).
+(find, shrink, replay against the buggy and fixed systems, the native case
+confirmed on the `fe test` EVM, 1,000,000 native cases, and the ERC-20
+mutant). It is rendered by `scripts/record-demo.sh` from real CLI output
+captured on x86-64 Linux with fecheck 0.3.0 and Fe 26.6.0 at `4d25819`
+([CI run 45153531272](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45153531272));
+only the long regression test is trimmed, with a marker.
 
 ## Why
 
