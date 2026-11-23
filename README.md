@@ -34,6 +34,29 @@ come from Fe itself:
   tests) on Sonatina and native alike. Replay reads the recorded choices, not
   a seed, so it doesn't depend on either backend's integer behaviour.
 
+## Find natively, confirm on chain
+
+The `fe test` EVM is gas-capped; native code isn't. Demo C's contracts and
+Demo A's in-memory system call the same Fe registry functions
+(`permissions::registry_*`), so FeCheck can search at native speed and
+confirm on chain:
+
+1. `fecheck run permissions --seed 12345` (native CLI) fails on case 45,
+   shrinks to 4 operations and writes a `.case` file.
+2. That file is checked in as
+   [examples/contract/cases/permissions-native.case](examples/contract/cases/permissions-native.case)
+   and pasted into [examples/contract/src/native_case.fe](examples/contract/src/native_case.fe).
+3. On the EVM, `replay_machine_with` parses it with the same pure Fe parser
+   and replays it against freshly deployed contracts: it reproduces on
+   `CachedRegistry` (same failure, same step, same `op` lines) and passes on
+   `FixedRegistry`.
+
+[scripts/native-to-evm.sh](scripts/native-to-evm.sh) runs all of this in CI
+and fails if the native CLI's case differs by a byte from the checked-in
+file or the embedded text. It also runs 1,000,000 cases against the fixed
+logic natively, which took about a second on GitHub's runner
+(CI run 45124068141).
+
 ## The headline: a bug in a deployed EVM contract, found and minimized
 
 `CachedRegistry` ([examples/contract/src/lib.fe](examples/contract/src/lib.fe))
