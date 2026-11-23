@@ -246,9 +246,9 @@ those tools.
 | Web visualisation | not built (deliberately; see limitations) |
 
 The [test results](docs/testing.md) identify the revision and backend for
-each run. [CI run 45141895706](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45141895706)
-passed every EVM and native suite and all 54 CLI checks on the final code
-commit, `bae50dc`.
+each run. [CI run 45247761227](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45247761227)
+passed every EVM and native suite and all 54 CLI checks on the last code
+change, `36df3c7`; later commits touch documentation only.
 
 ## Quick start
 

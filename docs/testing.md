@@ -1,6 +1,6 @@
 # Testing
 
-The final code commit `bae50dc` passed [CI run 45141895706](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45141895706/job/137581666909) on x86-64 Linux with Fe 26.6.0: every EVM suite, every native suite, all 54 native CLI checks, Demo C and the native-to-EVM replay. Locally on aarch64 Linux, all 181 EVM suite tests passed on both Fe 26.6.0 and Fe 26.7.0 ([26.7 log](evidence/fe-26.7.0.txt)).
+The last code change, `36df3c7`, passed [CI run 45247761227](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45247761227) on x86-64 Linux with Fe 26.6.0: every EVM suite, every native suite, all 54 native CLI checks, Demo C and the native-to-EVM replay. Later commits change documentation only. Locally on aarch64 Linux, all 182 EVM suite tests passed on Fe 26.6.0 at `36df3c7`, and all 181 passed on Fe 26.7.0 at `bae50dc` ([26.7 log](evidence/fe-26.7.0.txt)).
 
 The checked-in [EVM test log](evidence/test-run.txt), [CLI log](evidence/cli-checks.txt) and [Demo C log](evidence/contract-demo.txt) are historical runs. The [native timing log](evidence/ci-run-native-to-evm.txt) records 507 ms at `c8acf71`; CI on `bae50dc` measured 525 ms for the same one-million-case workload.
 
@@ -20,7 +20,7 @@ fe test examples/recipes          # eight property patterns (docs/recipes.md)
 for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/abi examples/external cli; do fe fmt --check "$d"; done
 ```
 
-## Results at `bae50dc`
+## Results at `36df3c7`
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|

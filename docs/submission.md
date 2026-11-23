@@ -51,7 +51,7 @@ fe test examples/abi         # Demo F: Fe's Solidity ABI encoder/decoder vs the 
 * License: Apache-2.0
 * Compiler: `fe 26.6.0 (5b3f96a)`
 * Commit SHA: the full SHA given in the submission form
-* CI: https://github.com/Xuefeng-Zhu/fecheck/actions (EVM and native suites, Demo C, CLI checks); run 45141895706 is the final code commit `bae50dc`
+* CI: https://github.com/Xuefeng-Zhu/fecheck/actions (EVM and native suites, Demo C, CLI checks); run 45247761227 passed on the last code change `36df3c7` (later commits are documentation only)
 * Project manifest: `fe.toml` (workspace) and each ingot's `fe.toml`
 
 ## Pre-existing work and reuse

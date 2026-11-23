@@ -16,7 +16,7 @@ A development mutation of the `u8` reference mask from `0xff` to `0x7f` made `sh
 
 ## Result
 
-**The tested operations agreed with their references on the sampled inputs.** As of commit `5032ecb` (CI run [45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)):
+**The tested operations agreed with their references on the sampled inputs.** As of commit `36df3c7` (CI run [45247761227](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45247761227)):
 
 | Run | Backend | Properties | Configured passing cases |
 |---|---|---|---|
