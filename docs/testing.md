@@ -1,7 +1,9 @@
 # Testing
 
-All results below come from a clean clone of commit `5ede679`, run with
-`fe 26.6.0 (5b3f96a)` on 2026-11-19 (PST). Raw logs:
+EVM results for the core and Demos A to C come from a clean clone of commit
+`5ede679`, run with `fe 26.6.0 (5b3f96a)` on 2026-11-19 (PST); native results
+and Demo D come from GitHub Actions CI on 2026-11-22 (see the note under
+Results). Raw logs:
 [evidence/test-run.txt](evidence/test-run.txt),
 [evidence/cli-checks.txt](evidence/cli-checks.txt),
 [evidence/contract-demo.txt](evidence/contract-demo.txt). The 0.1.0 bugs
@@ -15,9 +17,10 @@ these changes fix are reproduced against the old binary in
 fe test ingots/fecheck            # one suite
 fe test --backend native ingots/fecheck
 ./scripts/contract-demo.sh        # Demo C end to end
+fe test examples/differential     # Demo D on the EVM (and with --backend native)
 ./scripts/external-check.sh       # FeCheck from an ingot outside the repo
 ./scripts/cli-checks.sh           # after ./scripts/build.sh
-for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/external cli; do fe fmt --check "$d"; done
+for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/external cli; do fe fmt --check "$d"; done
 ```
 
 ## Results
@@ -28,17 +31,22 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 | `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
 | `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
 | `examples/contract` (Demo C) | 5 passed | n/a (EVM contract) |
+| `examples/differential` (Demo D, 110,000 cases) | 29 passed | 29 passed (CI) |
+| `examples/differential_deep` (Demo D, 11,000,000 cases) | n/a (exceeds the EVM test gas cap) | 29 passed (CI) |
 | `examples/external` (copied outside the repo) | 3 passed | |
 | `scripts/contract-demo.sh` | shrunk case fails on Cached, passes on Fixed | |
 | `scripts/cli-checks.sh` (native CLI, built from the clone) | | 41 of 41 checks passed |
-| `fe fmt --check` (all six ingots) | clean | |
+| `fe fmt --check` (all eight ingots) | clean | |
 
 Native results come from GitHub Actions (`ubuntu-latest`, x86-64), which runs
 `./scripts/test.sh` on every push. Run
 [45103740959](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45103740959)
 on commit `caa2a56` passed every step: format check, all EVM and native
 suites, the external ingot, Demo C and 41 of 41 CLI checks. The raw log is in
-`docs/evidence/ci-run-caa2a56.txt`. The development host was AArch64 Linux,
+`docs/evidence/ci-run-caa2a56.txt`. Demo D was added after that run; its
+results come from run
+[45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)
+(`docs/evidence/ci-run-differential.txt`). The development host was AArch64 Linux,
 where Fe 26.6 has no native backend; there the CLI was built with an x86-64 Fe
 under qemu-user and the native `fe test` suites were left to CI.
 

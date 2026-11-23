@@ -60,6 +60,26 @@ adds no values of its own and exits non-zero unless the shrunk case fails on
 (`STALE_CACHE`, two tests, one per contract) reruns with
 `fe test examples/contract --filter regression_stale_cache`.
 
+## Pointed at Fe itself: EVM vs native, 11 million cases
+
+Demos A to C find bugs that were planted for them. Demo D
+([docs/differential.md](docs/differential.md)) tests code this project did
+not write: Fe 26.6's `core::num` and the compiler's lowering of integer
+operators. 29 properties check shifts past the type's width, signed division,
+saturation, `wrapping_pow`, narrowing casts, `addmod`/`mulmod`, the 512-bit
+`full_mul` and `checked_mul_div`, `isqrt`, `gcd`, bit counts and `swap_bytes`
+against independent references, under both backends.
+
+| Run | Backend | Generated cases | Result |
+|---|---|---|---|
+| `fe test examples/differential` | Sonatina EVM | 110,000 | no divergence |
+| `fe test --backend native examples/differential` | native x86-64 (CI) | 110,000 | no divergence |
+| `fe test --backend native examples/differential_deep` | native x86-64 (CI) | 11,000,000 | no divergence |
+
+No Fe bug turned up. The suite stays in CI as a regression net for the
+compiler and the core library, and it is the template for checking one Fe
+backend against another.
+
 ## The same idea from the CLI
 
 ```
@@ -121,6 +141,7 @@ those tools.
 | Demo A: agent permissions with a stale-cache bug | done |
 | Demo B: bounded ring-buffer queue with a wrap-around bug | done |
 | Demo C: the permission bug in a deployed **EVM contract**, end to end with `scripts/contract-demo.sh` | done |
+| Demo D: differential properties for Fe's core arithmetic on both backends (`examples/differential`, native deep run in `examples/differential_deep`) | done, no divergence found |
 | A stand-alone ingot using FeCheck as a dependency, tested from outside the repo | done (`examples/external`, `scripts/external-check.sh`) |
 | Web visualisation | not built (deliberately; see limitations) |
 
@@ -326,6 +347,8 @@ ingots/fecheck/src/         the library (all Fe)
 examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
+examples/differential/      Demo D (Fe core arithmetic vs references, both backends)
+examples/differential_deep/ Demo D at 100x the case count, native only
 cli/                        native `fecheck` executable (Fe)
 examples/external/          a stand-alone ingot depending on fecheck
 tests/fixtures/             case files written by earlier FeCheck versions
@@ -338,9 +361,10 @@ docs/                       architecture, compatibility, testing, limitations, s
 
 * [docs/architecture.md](docs/architecture.md): design and comparison with Hypothesis, proptest, fast-check, Foundry and Echidna
 * [docs/fe-compatibility.md](docs/fe-compatibility.md): what was verified in Fe 26.6 and how the design adapted
+* [docs/differential.md](docs/differential.md): Demo D, Fe's own arithmetic on EVM and native
 * [docs/testing.md](docs/testing.md): test inventory and recorded results
 * [docs/limitations.md](docs/limitations.md): known limitations and follow-up work
-* [docs/submission.md](docs/submission.md): pitch, Fe highlight, AI disclosure, checklist
+* [docs/submission.md](docs/submission.md): pitch, Fe highlight, AI disclosure
 
 ## License
 

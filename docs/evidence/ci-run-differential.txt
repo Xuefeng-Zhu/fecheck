@@ -1,0 +1,103 @@
+# GitHub Actions CI run 45105951179, commit 5032ecb (ubuntu-latest, x86-64), conclusion: success
+# https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179
+# Demo D sections of ./scripts/test.sh (timestamps stripped)
+
+== fe test (Sonatina / EVM backend)
+-- examples/differential
+PASS  [0.1111s] ctz_u256_agrees
+PASS  [0.1162s] div_i64_agrees
+PASS  [0.1375s] clz_u256_agrees
+PASS  [0.1418s] clz_u64_agrees
+PASS  [0.2372s] downcast_i256_agrees
+PASS  [0.1352s] full_mul_agrees
+PASS  [0.2654s] addmod_agrees
+PASS  [0.1625s] downcast_u256_agrees
+PASS  [0.1379s] isqrt_agrees
+PASS  [0.1131s] pow_u64_agrees
+PASS  [0.3789s] gcd_agrees
+PASS  [0.3081s] mul_u256_agrees
+PASS  [0.1944s] sar_i8_agrees
+PASS  [0.6117s] div_u256_agrees
+PASS  [0.1357s] saturating_i64_agrees
+PASS  [0.4706s] mul_div_agrees
+PASS  [0.0692s] shl_u32_agrees
+PASS  [0.1483s] shift_u128_agrees
+PASS  [0.0615s] shl_u8_agrees
+PASS  [0.0865s] shl_u64_agrees
+PASS  [0.2440s] saturating_u64_agrees
+PASS  [0.0873s] shr_u64_agrees
+PASS  [0.0551s] shr_u8_agrees
+PASS  [0.0344s] swap_u64_agrees
+PASS  [0.8619s] div_i128_agrees
+PASS  [0.2735s] shl_u256_agrees
+PASS  [0.6216s] sar_i64_agrees
+PASS  [0.0906s] wrapping_u8_agrees
+PASS  [0.6848s] mulmod_agrees
+
+test result: ok. 29 passed; 0 failed
+
+== fe test --backend native
+-- examples/differential
+PASS  [0.0040s] shr_u8_agrees
+PASS  [0.0062s] shr_u64_agrees
+PASS  [0.0064s] shl_u64_agrees
+PASS  [0.0098s] shl_u8_agrees
+PASS  [0.0065s] sar_i8_agrees
+PASS  [0.0072s] saturating_u64_agrees
+PASS  [0.0079s] full_mul_agrees
+PASS  [0.0157s] addmod_agrees
+PASS  [0.0333s] wrapping_u8_agrees
+PASS  [0.0334s] isqrt_agrees
+PASS  [0.0335s] gcd_agrees
+PASS  [0.0392s] shl_u256_agrees
+PASS  [0.0256s] div_u256_agrees
+PASS  [0.0111s] pow_u64_agrees
+PASS  [0.0293s] mul_u256_agrees
+PASS  [0.0134s] div_i64_agrees
+PASS  [0.0489s] mulmod_agrees
+PASS  [0.0457s] mul_div_agrees
+PASS  [0.0144s] clz_u64_agrees
+PASS  [0.0169s] clz_u256_agrees
+PASS  [0.0170s] ctz_u256_agrees
+PASS  [0.0109s] sar_i64_agrees
+PASS  [0.0083s] shl_u32_agrees
+PASS  [0.0173s] shift_u128_agrees
+PASS  [0.0261s] swap_u64_agrees
+PASS  [0.0220s] div_i128_agrees
+PASS  [0.0188s] downcast_i256_agrees
+PASS  [0.0203s] downcast_u256_agrees
+PASS  [0.0188s] saturating_i64_agrees
+
+test result: ok. 29 passed; 0 failed
+-- examples/differential_deep
+PASS  [0.1164s] deep_shl_u8_agrees
+PASS  [0.1355s] deep_shr_u8_agrees
+PASS  [0.1404s] deep_shr_u64_agrees
+PASS  [0.1902s] deep_shl_u64_agrees
+PASS  [0.1942s] deep_wrapping_u8_agrees
+PASS  [0.2547s] deep_saturating_u64_agrees
+PASS  [0.2743s] deep_sar_i8_agrees
+PASS  [0.3175s] deep_full_mul_agrees
+PASS  [0.4072s] deep_addmod_agrees
+PASS  [0.6989s] deep_shl_u256_agrees
+PASS  [0.2445s] deep_pow_u64_agrees
+PASS  [0.7578s] deep_isqrt_agrees
+PASS  [0.2125s] deep_div_i64_agrees
+PASS  [0.1363s] deep_clz_u64_agrees
+PASS  [0.0909s] deep_swap_u64_agrees
+PASS  [0.2471s] deep_ctz_u256_agrees
+PASS  [0.1250s] deep_shl_u32_agrees
+PASS  [0.6824s] deep_clz_u256_agrees
+PASS  [0.3915s] deep_sar_i64_agrees
+PASS  [0.2504s] deep_shift_u128_agrees
+PASS  [0.2418s] deep_downcast_u256_agrees
+PASS  [0.2212s] deep_downcast_i256_agrees
+PASS  [0.3051s] deep_saturating_i64_agrees
+PASS  [2.3020s] deep_mul_div_agrees
+PASS  [2.0901s] deep_mul_u256_agrees
+PASS  [2.5516s] deep_div_u256_agrees
+PASS  [2.7885s] deep_mulmod_agrees
+PASS  [2.8957s] deep_gcd_agrees
+PASS  [1.9647s] deep_div_i128_agrees
+
+test result: ok. 29 passed; 0 failed
