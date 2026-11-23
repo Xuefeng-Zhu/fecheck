@@ -8,6 +8,13 @@ a model and commands in Fe; FeCheck generates operation sequences, finds a
 violation, shrinks it to a short story, saves it as a portable `.case` file,
 and replays it after the fix, from `fe test` or a native CLI.
 
+Beyond the planted-bug demos, FeCheck was pointed at code it did not write:
+Fe 26.6's own integer arithmetic on the EVM and native backends (29
+differential properties, 110,000 cases per backend plus 11 million native,
+no divergence) and the ERC-20 from the Fe compiler's test suite (1,000
+model-checked transaction sequences across three holder contracts, no bug;
+a one-line mutant is caught).
+
 ## Fe-specific highlight
 
 Determinism is enforced by Fe's effect system. The FeCheck core declares no
@@ -23,6 +30,9 @@ candidate, inside plain `fe test`. Only the CLI file declares `Stdout`,
 
 ```sh
 ./scripts/contract-demo.sh   # Demo C: minimized EVM transaction sequence, both contracts
+fe test examples/differential                   # Demo D on the EVM
+fe test --backend native examples/differential  # Demo D native
+fe test examples/erc20       # Demo E: Fe's ERC-20 fixture vs an ERC-20 model
 ./scripts/test.sh            # all suites, external ingot, CLI build, CLI checks
 ./out/fecheck demo           # Demo A and B end to end
 ```

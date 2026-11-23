@@ -30,6 +30,22 @@ Living list. Items are honest constraints of the current implementation.
 * Command observations are compared with `Eq`; there is no generic diffing of
   model and SUT state.
 
+## Demos D and E
+
+* Demo D (differential) found **no** Fe bug. It covers integer operators and
+  `core::num` helpers only, not memory, storage, ABI encoding or control
+  flow. Each backend is held to the same Fe reference rather than to the
+  other backend's raw output, so a bug shared by the reference and the
+  operation (both built on the same primitive) would go unnoticed; the
+  references avoid the operation they check to keep that risk small.
+* The 11-million-case deep run is native only: the `fe test` EVM caps gas at
+  10^9 per test.
+* Demo E (ERC-20) runs on the EVM only and found no bug in CoolCoin. Its
+  model covers `transfer`, `approve`, `transferFrom`, `mint`, balances,
+  allowances and supply for three holders; it does not check events or
+  `name`/`symbol`/`decimals`. Each test is capped at 200 sequences by the
+  per-test gas limit, so five seeds give the 1,000.
+
 ## Tooling
 
 * The native CLI needs an x86-64 Linux or AArch64 macOS host (Fe 26.6
