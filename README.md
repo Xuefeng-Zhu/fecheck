@@ -60,6 +60,11 @@ adds no values of its own and exits non-zero unless the shrunk case fails on
 (`STALE_CACHE`, two tests, one per contract) reruns with
 `fe test examples/contract --filter regression_stale_cache`.
 
+Five hand-written unit tests for the same contract, including "a revoked
+agent cannot execute", all pass on the buggy version: the bug needs an
+`execute` before the `revoke`. See
+[docs/vs-hand-written.md](docs/vs-hand-written.md).
+
 ## Pointed at Fe itself: EVM vs native, 11 million cases
 
 Demos A to C find bugs that were planted for them. Demo D
@@ -412,6 +417,7 @@ docs/                       architecture, compatibility, testing, limitations, s
 * [docs/architecture.md](docs/architecture.md): design and comparison with Hypothesis, proptest, fast-check, Foundry and Echidna
 * [docs/fe-compatibility.md](docs/fe-compatibility.md): what was verified in Fe 26.6 and how the design adapted
 * [docs/first-test.md](docs/first-test.md): your first FeCheck test in five minutes
+* [docs/vs-hand-written.md](docs/vs-hand-written.md): the same bug, hand-written tests vs FeCheck
 * [docs/differential.md](docs/differential.md): Demo D, Fe's own arithmetic on EVM and native
 * [docs/testing.md](docs/testing.md): test inventory and recorded results
 * [docs/limitations.md](docs/limitations.md): known limitations and follow-up work

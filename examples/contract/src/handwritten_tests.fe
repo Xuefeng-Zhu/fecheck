@@ -1,0 +1,97 @@
+// The unit tests a careful developer would write by hand for the registry,
+// run against the BUGGY `CachedRegistry`. Every one of them passes: none
+// reaches the stale cache, which needs an `execute` before the `revoke`.
+// FeCheck finds that sequence in `machine_finds_the_stale_cache`.
+// See docs/vs-hand-written.md.
+
+use std::evm::Evm
+use ingot::{CachedRegistry, PermissionMsg}
+
+fn deploy() -> Address uses (evm: mut Evm) {
+    evm.create<CachedRegistry>(value: Wei::zero(), args: ())
+}
+
+fn grant(_ r: Address, _ agent: u256) uses (evm: mut Evm) {
+    evm.call(
+        addr: r,
+        gas: 200000,
+        value: Wei::zero(),
+        message: PermissionMsg::Grant { agent },
+    )
+}
+
+fn revoke(_ r: Address, _ agent: u256) uses (evm: mut Evm) {
+    evm.call(
+        addr: r,
+        gas: 200000,
+        value: Wei::zero(),
+        message: PermissionMsg::Revoke { agent },
+    )
+}
+
+fn execute(_ r: Address, _ agent: u256) -> bool uses (evm: mut Evm) {
+    evm.call(
+        addr: r,
+        gas: 200000,
+        value: Wei::zero(),
+        message: PermissionMsg::Execute { agent },
+    )
+}
+
+/// 1. A granted agent can execute.
+#[test]
+fn hand_granted_agent_can_execute() uses (evm: mut Evm) {
+    let r = deploy()
+    grant(r, 1)
+    assert!(execute(r, 1))
+}
+
+/// 2. An agent nobody granted cannot execute.
+#[test]
+fn hand_unknown_agent_cannot_execute() uses (evm: mut Evm) {
+    let r = deploy()
+    assert!(!execute(r, 1))
+}
+
+/// 3. A revoked agent cannot execute: the test aimed squarely at the bug,
+/// and it passes, because `grant` left the cache invalid.
+#[test]
+fn hand_revoked_agent_cannot_execute() uses (evm: mut Evm) {
+    let r = deploy()
+    grant(r, 1)
+    revoke(r, 1)
+    assert!(!execute(r, 1))
+}
+
+/// 4. Revoking one agent leaves the other alone.
+#[test]
+fn hand_revoke_is_per_agent() uses (evm: mut Evm) {
+    let r = deploy()
+    grant(r, 1)
+    grant(r, 2)
+    revoke(r, 1)
+    assert!(!execute(r, 1))
+    assert!(execute(r, 2))
+}
+
+/// 5. Re-granting after a revoke restores access, and repeated executes agree.
+#[test]
+fn hand_regrant_restores_access() uses (evm: mut Evm) {
+    let r = deploy()
+    grant(r, 1)
+    revoke(r, 1)
+    grant(r, 1)
+    assert!(execute(r, 1))
+    assert!(execute(r, 1))
+}
+
+/// The four-step sequence FeCheck found. Written by hand only after seeing it.
+#[test]
+fn hand_the_sequence_fecheck_found() uses (evm: mut Evm) {
+    let r = deploy()
+    grant(r, 1)
+    assert!(execute(r, 1))
+    revoke(r, 1)
+    // The bug: the cached `true` survives the revoke.
+    assert!(execute(r, 1))
+}
