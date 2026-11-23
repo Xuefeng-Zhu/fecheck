@@ -199,7 +199,9 @@ fn execute<M: StateMachine>(
         if strict && src.clamped() != 0 && trace.repaired_step == NO_STEP {
             trace.repaired_step = index
         }
-        if !more { break }
+        if !more || trace.repaired_step != NO_STEP {
+            break
+        }
         let cmd = machine.gen_cmd(mut src, model)
         if strict {
             trace.command_end = src.len()
@@ -207,7 +209,7 @@ fn execute<M: StateMachine>(
                 trace.repaired_step = index
             }
         }
-        if src.overran() || src.problem() != 0 {
+        if trace.repaired_step != NO_STEP || src.overran() || src.problem() != 0 {
             break
         }
         if !machine.precondition(model, cmd) {
@@ -284,7 +286,7 @@ fn execute<M: StateMachine>(
 /// ```fe
 /// #[test]
 /// fn registry() uses (evm: mut Evm) {
-///     let r = check(|src: mut Source| run_steps_with(RegistryMachine {}, mut src, steps(20, 8)),
+///     let r = check(|src: mut Source| run_steps_with(RegistryMachine { fixed: true }, mut src, steps(20, 8)),
 ///                   Config::new(seed: 1, cases: 200))
 ///     assert!(r.passed())
 /// }
@@ -383,7 +385,9 @@ uses (env: mut M::Env)
         if strict && src.clamped() != 0 && trace.repaired_step == NO_STEP {
             trace.repaired_step = index
         }
-        if !more { break }
+        if !more || trace.repaired_step != NO_STEP {
+            break
+        }
         let cmd = machine.gen_cmd(mut src, model)
         if strict {
             trace.command_end = src.len()
@@ -391,7 +395,7 @@ uses (env: mut M::Env)
                 trace.repaired_step = index
             }
         }
-        if src.overran() || src.problem() != 0 {
+        if trace.repaired_step != NO_STEP || src.overran() || src.problem() != 0 {
             break
         }
         if !machine.precondition(model, cmd) {

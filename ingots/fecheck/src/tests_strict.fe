@@ -162,6 +162,8 @@ fn property_case(_ choices: own MemVec<u64>) -> Case {
     case.choices = choices
     case.verdict = Verdict::Fail { code: 5 }
     case.has_failed_step = false
+    case.has_steps = false
+    case.skipped = MemVec::new()
     case.ops = MemVec::new()
     case
 }

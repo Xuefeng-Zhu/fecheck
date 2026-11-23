@@ -68,6 +68,12 @@ impl ReplayOutcome {
 pub fn replay_property<F: Fn(mut Source) -> Verdict>(_ test: F, _ case: Case) -> ReplayOutcome
 uses F::E
 {
+    if !case.verdict.is_failure()
+        || case.ops.len() != 0
+        || case.has_failed_step
+        || (case.schema >= 4 && case.has_steps) {
+        return ReplayOutcome::Invalid
+    }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let v = test(mut src)
     if src.overran() || src.problem() != 0 || v.is_discard() {
@@ -86,9 +92,7 @@ uses F::E
     classify(v, src.overran(), NO_STEP, case)
 }
 
-/// The `op` line for a step: its command, marked when the precondition
-/// skipped it (schema 3), so replay can tell a skipped command from an
-/// executed one.
+/// Render a legacy schema-3 operation. Its optional prefix is ambiguous.
 pub fn op_text(_ command: MemBuffer, _ skipped: bool) -> MemBuffer {
     if skipped {
         format!(SKIPPED_PREFIX, command)
@@ -111,7 +115,7 @@ fn machine_outcome(_ case: Case, _ trace: Trace, _ src: Source) -> ReplayOutcome
             return ReplayOutcome::Drift { step }
         }
         // Schema 3 cannot distinguish a literal prefix from a skip marker.
-        if case.schema == 3 && case.ops[i].span().starts_with(SKIPPED_PREFIX) {
+        if case.schema == 3 && (skipped || case.ops[i].span().starts_with(SKIPPED_PREFIX)) {
             return ReplayOutcome::Drift { step }
         }
         if trace.steps[i].command != case.ops[i] || (step == case.failed_step && skipped) {

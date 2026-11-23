@@ -69,6 +69,8 @@ fn sample() -> Case {
 fn propcase() -> Case {
     var c = sample()
     c.has_failed_step = false
+    c.has_steps = false
+    c.skipped = MemVec::new()
     c.ops = MemVec::new()
     c
 }
@@ -95,7 +97,7 @@ fn missing_zero_operand_drifts_even_on_pass() {
     let _ = c.choices.pop()
     let (o, _) = replay_machine(machine(2), steps(3, 2), c)
     let (f, t) = replay_machine(machine(0), steps(3, 2), c)
-    assert!(o.kind() == 4 && f.kind() == 4 && t.executed == 2)
+    assert!(o.kind() == 4 && f.kind() == 4 && t.executed == 1)
 }
 #[test]
 fn clamp_identifies_second_operation() {
@@ -322,4 +324,54 @@ fn terminal_continuation_at_choice_limit_is_valid() {
     let (a, _) = replay_machine(Wide { fixed: false }, steps(3, 2), c)
     let (b, t) = replay_machine(Wide { fixed: true }, steps(3, 2), c)
     assert!(a.is_reproduced() && b.kind() == 1 && t.verdict.is_pass())
+}
+
+#[test]
+fn property_entry_point_rejects_machine_recording() {
+    let outcome = replay_property(
+        |src: mut Source| {
+            while src.unread() != 0 {
+                let _ = src.draw(3)
+            }
+            Verdict::Pass
+        },
+        sample(),
+    )
+    assert!(outcome.kind() == 3)
+}
+
+#[test]
+fn full_width_choice_line_fits_parser_limit() {
+    // 4096 decimal u64::MAX values, each preceded by one space.
+    let bytes = format!("choices").len()
+        + ingot::artifact::MAX_CASE_CHOICES * format!(" ", 0xffffffffffffffff as u64).len()
+    assert!(bytes <= ingot::artifact::MAX_LINE)
+}
+
+#[test]
+fn a_shrink_with_an_empty_domain_is_ineligible() {
+    let r = check(
+        |src: mut Source| {
+            if src.draw(100) == 0 {
+                let _ = one_of(0).generate(mut src)
+            }
+            Verdict::Fail { code: 17 }
+        },
+        Config::new(seed: 1, cases: 1),
+    )
+    assert!(r.failed() && r.shrunk[0] == 1)
+}
+
+#[test]
+fn schema_three_unmarked_prefix_must_execute() {
+    let c = parse(
+        format!(
+            "fecheck-case 3\ntest t\ntarget t\ncompiler c\nfecheck v\nseed 1\ncase 0\ncases 1\nsteps 3 2\nverdict fail 7\nfailed-step 2\noriginal-length 3\nchoices 1 3 1 0 1 0\nop 3\nop 0\nop 0\nviolation failed\nend\n",
+        ),
+    )
+    let (outcome, _) = replay_machine(machine(2), steps(3, 2), c)
+    match outcome {
+        ReplayOutcome::Drift { step } => assert!(step == 0),
+        _ => assert!(false),
+    }
 }

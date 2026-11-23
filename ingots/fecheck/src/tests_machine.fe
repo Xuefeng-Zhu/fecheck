@@ -387,6 +387,10 @@ fn replay_detects_a_different_failure() {
 #[test]
 fn replay_never_reads_an_error_as_success() {
     var case = parse(encode(found_case(buggy())))
+    case.has_steps = false
+    case.has_failed_step = false
+    case.ops = MemVec::new()
+    case.skipped = MemVec::new()
     // A property that errors on these choices must not count as reproduced
     // a recorded *failure*, nor as fixed.
     let outcome = replay_property(
@@ -411,9 +415,12 @@ fn replay_property_round_trip() {
     }
     let report = check(test, Config::new(seed: 3, cases: 100))
     var case = parse(encode(found_case(buggy())))
+    case.has_steps = false
+    case.has_failed_step = false
+    case.ops = MemVec::new()
+    case.skipped = MemVec::new()
     case.choices = copy_choices(report.shrunk)
     case.verdict = report.shrunk_verdict
-    case.has_failed_step = false
     let outcome = replay_property(test, case)
     assert!(outcome.is_reproduced())
 }

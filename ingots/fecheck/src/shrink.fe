@@ -19,9 +19,8 @@
 //
 // A candidate is only accepted when the choices it actually read are
 // strictly smaller in shortlex order, so every accepted step makes progress
-// and the search terminates even with an unlimited budget. The result is a
-// *locally minimal* counterexample: no single pass step improves it. It is
-// not guaranteed to be the globally smallest failing input.
+// and the search terminates even with an unlimited budget. The result is the best accepted candidate within the budget.
+// Binary search can miss smaller values for a non-monotone failure.
 
 use core::MemVec
 use super::source::{Source, copy_choices, simpler}
@@ -81,7 +80,7 @@ uses F::E
     s.stats.attempts += 1
     var src = Source::replay(candidate, s.max_choices)
     let v = test(mut src)
-    if src.overran() {
+    if src.overran() || src.problem() != 0 {
         return false
     }
     if !v.same_failure(s.target) {
