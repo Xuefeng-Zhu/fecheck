@@ -1,0 +1,325 @@
+// Strict replay tests, including damaged recordings and earlier verdicts.
+use ingot::*
+use core::{MemBuffer, MemVec}
+use std::io::Display
+
+struct M { skip: bool, fail_at: u64 }
+impl Copy for M {}
+impl StateMachine for M {
+    type Cmd = u64
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> u64 {
+        0
+    }
+    fn gen_cmd(self, _ src: mut Source, _ model: u64) -> u64 {
+        src.draw(3)
+    }
+    fn precondition(self, _ model: u64, _ cmd: u64) -> bool {
+        !self.skip && cmd != 3
+    }
+    fn run_model(self, _ model: mut u64, _ cmd: u64) -> u64 {
+        model += 1
+        model
+    }
+    fn run_sut(self, _ sut: mut u64, _ cmd: u64) -> u64 {
+        sut += 1
+        sut
+    }
+    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict {
+        if self.fail_at == 99 {
+            Verdict::Discard
+        } else {
+            ensure(sut != self.fail_at, 7)
+        }
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "failed")
+    }
+}
+fn machine(_ at: u64) -> M {
+    M { skip: false, fail_at: at }
+}
+fn build(_ cs: MemVec<u64>, _ t: Trace) -> Case {
+    machine_case(
+        test: format!("t"),
+        target: format!("t"),
+        compiler: format!("c"),
+        seed: 1,
+        case_index: 0,
+        cases: 1,
+        steps: steps(3, 2),
+        original_length: 2,
+        cs,
+        t,
+    )
+}
+fn make(_ cs: MemVec<u64>) -> Case {
+    var src = Source::replay(copy_choices(cs), 64)
+    let t = run_traced(machine(2), mut src, steps(3, 2))
+    build(cs, t)
+}
+fn sample() -> Case {
+    make(choices_from([1, 0, 1, 0]))
+}
+fn propcase() -> Case {
+    var c = sample()
+    c.has_failed_step = false
+    c.ops = MemVec::new()
+    c
+}
+fn parse(_ s: MemBuffer) -> Case {
+    match decode(s.span()) {
+        Result::Ok(c) => c,
+        _ => panic(),
+    }
+}
+#[test]
+fn earlier_failure_and_discard_keep_their_identity() {
+    let (o, t) = replay_machine(machine(1), steps(3, 2), sample())
+    assert!(o.kind() == 2 && t.failed_step == 0)
+    let (d, _) = replay_machine(machine(99), steps(3, 2), sample())
+    assert!(d.kind() == 3)
+    var changed = sample()
+    changed.ops[0] = format!("changed")
+    let (drift, _) = replay_machine(machine(1), steps(3, 2), changed)
+    assert!(drift.kind() == 4)
+}
+#[test]
+fn missing_zero_operand_drifts_even_on_pass() {
+    var c = sample()
+    let _ = c.choices.pop()
+    let (o, _) = replay_machine(machine(2), steps(3, 2), c)
+    let (f, t) = replay_machine(machine(0), steps(3, 2), c)
+    assert!(o.kind() == 4 && f.kind() == 4 && t.executed == 2)
+}
+#[test]
+fn clamp_identifies_second_operation() {
+    var c = sample()
+    c.choices[2] = 100
+    let (o, _) = replay_machine(machine(2), steps(3, 2), c)
+    match o {
+        ReplayOutcome::Drift { step } => assert!(step == 1),
+        _ => assert!(false),
+    }
+}
+#[test]
+fn property_read_nothing() {
+    let c = propcase()
+    let o = replay_property(|src: mut Source| Verdict::Fail { code: 7 }, c)
+    let p = replay_property(|src: mut Source| Verdict::Pass, c)
+    let different = replay_property(|src: mut Source| Verdict::Error { code: 99 }, c)
+    assert!(o.kind() == 4 && p.kind() == 4 && different.kind() == 2)
+}
+#[test]
+fn legacy_property_shape_is_invalid_on_machine_replay() {
+    let txt = format!(
+        "fecheck-case 3\ntest revoked_agent_cannot_execute\ntarget permissions\ncompiler c\nfecheck v\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step none\noriginal-length 0\nchoices\nviolation v\nend\n",
+    )
+    let (o, t) = replay_machine(machine(2), steps(40, 12), parse(txt))
+    assert!(o.kind() == 3 && t.executed == 0)
+}
+#[test]
+fn failure_must_be_the_last_operation() {
+    var c = sample()
+    c.failed_step = 0
+    assert!(decode(encode(c).span()).is_err())
+}
+#[test]
+fn skipped_final_failure_is_rejected() {
+    var c = make(choices_from([1, 3, 1, 0, 1, 0]))
+    c.skipped[2] = true
+    assert!(decode(encode(c).span()).is_err())
+}
+#[test]
+fn legacy_skipped_operation_round_trips() {
+    let legacy = format!(
+        "fecheck-case 2\ntest t\ntarget t\ncompiler c\nfecheck v\nseed 1\ncase 0\ncases 1\nsteps 3 2\nverdict fail 7\nfailed-step 2\noriginal-length 3\nchoices 1 3 1 0 1 0\nop 3\nop 0\nop 0\nviolation failed\nend\n",
+    )
+    let c = parse(legacy)
+    let (a, t) = replay_machine(machine(2), steps(3, 2), c)
+    let (b, _) = replay_machine(machine(2), steps(3, 2), parse(encode(c)))
+    assert!(t.skipped == 1 && a.kind() == 0 && b.kind() == 0)
+}
+enum Mark {
+    Plain,
+    Marked,
+}
+impl Copy for Mark {}
+impl Display for Mark {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Mark::Plain => write!(mut out, "X"),
+            Mark::Marked => write!(mut out, "(skipped) X"),
+        }
+    }
+}
+struct Marker { reject: bool }
+impl StateMachine for Marker {
+    type Cmd = Mark
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> u64 {
+        0
+    }
+    fn gen_cmd(self, _ src: mut Source, _ model: u64) -> Mark {
+        if self.reject {
+            Mark::Plain
+        } else {
+            Mark::Marked
+        }
+    }
+    fn precondition(self, _ model: u64, _ cmd: Mark) -> bool {
+        !self.reject
+    }
+    fn run_model(self, _ model: mut u64, _ cmd: Mark) -> u64 {
+        0
+    }
+    fn run_sut(self, _ sut: mut u64, _ cmd: Mark) -> u64 {
+        1
+    }
+    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict {
+        Verdict::Pass
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "mismatch")
+    }
+}
+#[test]
+fn literal_skip_prefix_is_command_text() {
+    let cs = choices_from([1])
+    var src = Source::replay(copy_choices(cs), 64)
+    let trace = run_traced(Marker { reject: false }, mut src, steps(3, 2))
+    assert!(trace.executed == 1 && trace.verdict.is_failure())
+    let (o, t) = replay_machine(
+        Marker { reject: true },
+        steps(3, 2),
+        parse(encode(build(cs, trace))),
+    )
+    assert!(o.kind() == 4 && t.executed == 0 && t.skipped == 1)
+}
+
+#[test]
+fn explicit_machine_needs_operations_and_choices() {
+    var c = sample()
+    c.choices = MemVec::new()
+    assert!(decode(encode(c).span()).is_err())
+    c.has_failed_step = false
+    c.ops = MemVec::new()
+    assert!(decode(encode(c).span()).is_err())
+}
+
+#[test]
+fn property_discard_and_eof() {
+    let c = propcase()
+    let d = replay_property(
+        |src: mut Source| {
+            let _ = src.draw(0)
+            Verdict::Discard
+        },
+        c,
+    )
+    assert!(d.kind() == 3)
+    var short = propcase()
+    short.choices = choices_from([1])
+    let o = replay_property(
+        |src: mut Source| {
+            let _ = src.draw(3)
+            let _ = src.draw(3)
+            Verdict::Pass
+        },
+        short,
+    )
+    assert!(o.kind() == 4)
+}
+
+#[test]
+fn legacy_property_steps_are_optional_and_irrelevant() {
+    let base = format!(
+        "fecheck-case 2\ntest t\ntarget t\ncompiler c\nfecheck v\nseed 1\ncase 0\ncases 1\n",
+    )
+    let tail = format!(
+        "verdict fail 7\nfailed-step none\noriginal-length 1\nchoices 1\nviolation failed\nend\n",
+    )
+    let placeholder = parse(format!(base, "steps 0 0\n", tail))
+    assert!(placeholder.has_steps && placeholder.steps_max == 0)
+    let absent = parse(format!(base, tail))
+    assert!(!parse(encode(absent)).has_steps)
+}
+
+#[test]
+fn command_bytes_survive_round_trip() {
+    var c = sample()
+    c.ops[0] = format!("(skipped) one\n\r\t\\two\" ")
+    let back = parse(encode(c))
+    assert!(back.ops[0] == c.ops[0] && !back.skipped[0])
+}
+
+#[test]
+fn passing_machine_cannot_consume_an_extra_stop_flag() {
+    var c = sample()
+    c.choices.push(0)
+    let (o, _) = replay_machine(machine(0), steps(3, 2), c)
+    assert!(o.kind() == 4)
+}
+struct Wide { fixed: bool }
+impl StateMachine for Wide {
+    type Cmd = u64
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> u64 {
+        0
+    }
+    fn gen_cmd(self, _ src: mut Source, _ m: u64) -> u64 {
+        var i: u64 = 0
+        while i < 4095 {
+            let _ = src.draw(1)
+            i += 1
+        }
+        0
+    }
+    fn precondition(self, _ m: u64, _ c: u64) -> bool {
+        true
+    }
+    fn run_model(self, _ m: mut u64, _ c: u64) -> u64 {
+        0
+    }
+    fn run_sut(self, _ s: mut u64, _ c: u64) -> u64 {
+        if self.fixed { 0 } else { 1 }
+    }
+    fn invariant(self, _ m: u64, _ s: u64) -> Verdict {
+        Verdict::Pass
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "wide")
+    }
+}
+#[test]
+fn terminal_continuation_at_choice_limit_is_valid() {
+    var cs = MemVec::new()
+    cs.push(1)
+    var i: u64 = 0
+    while i < 4095 {
+        cs.push(0)
+        i += 1
+    }
+    var src = Source::replay(copy_choices(cs), 4096)
+    let trace = run_traced(Wide { fixed: false }, mut src, steps(3, 2))
+    assert!(trace.verdict.is_failure() && !src.overran())
+    let c = parse(encode(build(cs, trace)))
+    let (a, _) = replay_machine(Wide { fixed: false }, steps(3, 2), c)
+    let (b, t) = replay_machine(Wide { fixed: true }, steps(3, 2), c)
+    assert!(a.is_reproduced() && b.kind() == 1 && t.verdict.is_pass())
+}

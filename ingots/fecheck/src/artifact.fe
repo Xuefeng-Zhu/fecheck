@@ -40,16 +40,16 @@ use core::text::parse_uint
 use super::verdict::{Verdict, kind_name, verdict_from_parts}
 use super::machine::steps as make_steps
 
-pub const SCHEMA_VERSION: u64 = 3
+pub const SCHEMA_VERSION: u64 = 4
 /// The oldest schema this FeCheck still reads.
 pub const MIN_SCHEMA_VERSION: u64 = 1
-pub const FECHECK_VERSION: String<5> = "0.2.0"
+pub const FECHECK_VERSION: String<5> = "0.3.0"
 /// Generation settings assumed for schema-1 files, which did not record them.
 pub const LEGACY_STEPS_MAX: u64 = 40
 pub const LEGACY_STEPS_MEAN: u64 = 12
 pub const MAX_CASE_CHOICES: usize = 4096
 pub const MAX_CASE_OPS: usize = 4096
-pub const MAX_LINE: usize = 65536
+pub const MAX_LINE: usize = 7 + 21 * MAX_CASE_CHOICES
 pub const MAX_FILE: usize = 4194304
 
 /// A parsed (or to-be-written) regression case.
@@ -58,6 +58,7 @@ pub struct Case {
     pub test: MemBuffer,
     pub target: MemBuffer,
     pub compiler: MemBuffer,
+    pub producer: MemBuffer,
     pub seed: u64,
     pub case_index: u64,
     pub cases: u64,
@@ -72,6 +73,8 @@ pub struct Case {
     pub original_length: u64,
     pub choices: MemVec<u64>,
     pub ops: MemVec<MemBuffer>,
+    /// Schema 4 stores the precondition result independently of Display.
+    pub skipped: MemVec<bool>,
     pub violation: MemBuffer,
 }
 
@@ -165,32 +168,79 @@ impl ParseError {
 
 impl Copy for ParseError {}
 
-/// Renders `case` in the schema-1 text format.
+/// Schema 4 encloses command bytes in quotes to preserve trailing whitespace.
+/// Only backslash, newline and carriage return need escaping inside the frame.
+fn write_command(_ out: mut MemBuffer, _ command: MemSpan) {
+    out.push(b'"')
+    for b in command {
+        if b == 92 {
+            out.push(92)
+            out.push(92)
+        } else if b == 10 {
+            out.push(92)
+            out.push(b'n')
+        } else if b == 13 {
+            out.push(92)
+            out.push(b'r')
+        } else {
+            out.push(b)
+        }
+    }
+    out.push(b'"')
+}
+
+fn read_command(_ text: MemSpan) -> Option<MemBuffer> {
+    let n = text.len()
+    if n < 2 || text[0] != b'"' || text[n - 1] != b'"' {
+        return Option::None
+    }
+    var cmd = MemBuffer::new(0)
+    var i: usize = 1
+    while i < n - 1 {
+        let b = text[i]
+        if b == 92 {
+            i += 1
+            if i >= n - 1 {
+                return Option::None
+            }
+            let escaped = text[i]
+            if escaped == b'n' {
+                cmd.push(10)
+            } else if escaped == b'r' {
+                cmd.push(13)
+            } else if escaped == 92 {
+                cmd.push(92)
+            } else {
+                return Option::None
+            }
+        } else {
+            cmd.push(b)
+        }
+        i += 1
+    }
+    Option::Some(cmd)
+}
+
+/// Re-encode using the recorded schema and producer.
 pub fn encode(_ case: Case) -> MemBuffer {
     var out = MemBuffer::new(0)
     writeln!(
         mut out,
         "# FeCheck regression case. Replay with: fecheck replay <this file>",
     )
-    writeln!(mut out, "fecheck-case ", SCHEMA_VERSION)
+    writeln!(mut out, "fecheck-case ", case.schema)
     writeln!(mut out, "test ", case.test)
     writeln!(mut out, "target ", case.target)
     writeln!(mut out, "compiler ", case.compiler)
-    writeln!(mut out, "fecheck ", FECHECK_VERSION)
+    writeln!(mut out, "fecheck ", case.producer)
     writeln!(mut out, "seed ", case.seed)
     writeln!(mut out, "case ", case.case_index)
     writeln!(mut out, "cases ", case.cases)
-    let steps_max = if case.has_steps {
-        case.steps_max
-    } else {
-        LEGACY_STEPS_MAX
+    if case.has_steps {
+        writeln!(mut out, "steps ", case.steps_max, " ", case.steps_mean)
+    } else if case.schema >= 4 {
+        writeln!(mut out, "steps none")
     }
-    let steps_mean = if case.has_steps {
-        case.steps_mean
-    } else {
-        LEGACY_STEPS_MEAN
-    }
-    writeln!(mut out, "steps ", steps_max, " ", steps_mean)
     writeln!(
         mut out,
         "verdict ",
@@ -209,8 +259,20 @@ pub fn encode(_ case: Case) -> MemBuffer {
         write!(mut out, " ", c)
     }
     writeln!(mut out)
+    var i: usize = 0
     for ref op in case.ops {
-        writeln!(mut out, "op ", op)
+        if case.schema >= 4 {
+            if case.skipped[i] {
+                write!(mut out, "op skip ")
+            } else {
+                write!(mut out, "op run ")
+            }
+            write_command(mut out, op.span())
+            writeln!(mut out)
+        } else {
+            writeln!(mut out, "op ", op)
+        }
+        i += 1
     }
     writeln!(mut out, "violation ", case.violation)
     writeln!(mut out, "end")
@@ -293,6 +355,7 @@ fn empty_case() -> Case {
         test: MemBuffer::new(0),
         target: MemBuffer::new(0),
         compiler: MemBuffer::new(0),
+        producer: MemBuffer::new(0),
         seed: 0,
         case_index: 0,
         cases: 0,
@@ -305,6 +368,7 @@ fn empty_case() -> Case {
         original_length: 0,
         choices: MemVec::new(),
         ops: MemVec::new(),
+        skipped: MemVec::new(),
         violation: MemBuffer::new(0),
     }
 }
@@ -344,7 +408,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         let rest = trimmed.slice(offset: rest_start, len: trimmed.len() - rest_start)
 
         // Schema 1 has no `steps` line.
-        if key_index == 8 && case.schema == 1 {
+        if key_index == 8 && (case.schema == 1 || (case.schema < 4 && key == "verdict")) {
             key_index = 9
         }
         // Repeated `op` lines stay at index 13; anything else advances.
@@ -387,7 +451,7 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         } else if key_index == 3 {
             case.compiler = format!(rest)
         } else if key_index == 4 {
-            // Library version: informational.
+            case.producer = format!(rest)
         } else if key_index == 5 || key_index == 6 || key_index == 7 || key_index == 11 {
             match parse_u64(rest) {
                 Option::Some(v) => {
@@ -405,6 +469,8 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
                     return Result::Err(ParseError::BadNumber { line: line_no })
                 },
             }
+        } else if key_index == 8 && case.schema >= 4 && rest == "none" {
+            case.has_steps = false
         } else if key_index == 8 {
             match rest.index_of(b' ') {
                 Option::Some(i) => {
@@ -483,7 +549,22 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
             if case.ops.len() >= MAX_CASE_OPS {
                 return Result::Err(ParseError::TooManyOps)
             }
-            case.ops.push(format!(rest))
+            if case.schema >= 4 {
+                let skip = rest.starts_with("skip ")
+                if !skip && !rest.starts_with("run ") {
+                    return Result::Err(ParseError::UnexpectedKey { line: line_no })
+                }
+                let start: usize = if skip { 5 } else { 4 }
+                match read_command(rest.slice(offset: start, len: rest.len() - start)) {
+                    Option::Some(cmd) => case.ops.push(cmd),
+                    Option::None => {
+                        return Result::Err(ParseError::UnexpectedKey { line: line_no })
+                    },
+                }
+                case.skipped.push(skip)
+            } else {
+                case.ops.push(format!(rest))
+            }
         } else if key_index == 14 {
             case.violation = format!(rest)
         } else if key_index == 15 {
@@ -505,16 +586,34 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
     if kind != 2 && kind != 3 {
         return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_VERDICT })
     }
-    if case.has_failed_step {
-        let n: u64 = case.ops.len().downcast_saturate()
-        if case.failed_step >= n {
+    if case.has_failed_step || case.ops.len() != 0 || (case.schema >= 4 && case.has_steps) {
+        if !case.valid_machine_failure() {
             return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEP })
         }
-    } else if case.ops.len() != 0 {
-        return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEP })
-    }
-    if case.has_steps && make_steps(case.steps_max, case.steps_mean).problem() != 0 {
-        return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEPS })
+        if (case.schema >= 2 && !case.has_steps)
+            || (case.has_steps && make_steps(case.steps_max, case.steps_mean).problem() != 0) {
+            return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEPS })
+        }
     }
     Result::Ok(case)
+}
+
+impl Case {
+    pub fn valid_machine_failure(self) -> bool {
+        let n = self.ops.len()
+        if !self.verdict.is_failure()
+            || self.choices.len() == 0
+            || n == 0
+            || !self.has_failed_step
+            || self.failed_step != (n - 1).downcast_saturate() {
+            return false
+        }
+        if self.schema >= 4 {
+            return self.skipped.len() == n && !self.skipped[n - 1]
+        }
+        if self.schema == 3 {
+            return !self.ops[n - 1].span().starts_with("(skipped) ")
+        }
+        true
+    }
 }

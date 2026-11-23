@@ -149,11 +149,11 @@ pub fn native_case_text() -> MemBuffer {
         mut out,
         "# FeCheck regression case. Replay with: fecheck replay <this file>",
     )
-    writeln!(mut out, "fecheck-case 3")
+    writeln!(mut out, "fecheck-case 4")
     writeln!(mut out, "test revoked_agent_cannot_execute")
     writeln!(mut out, "target permissions")
     writeln!(mut out, "compiler fe 26.6.0")
-    writeln!(mut out, "fecheck 0.2.0")
+    writeln!(mut out, "fecheck 0.3.0")
     writeln!(mut out, "seed 12345")
     writeln!(mut out, "case 44")
     writeln!(mut out, "cases 1000")
@@ -162,10 +162,10 @@ pub fn native_case_text() -> MemBuffer {
     writeln!(mut out, "failed-step 3")
     writeln!(mut out, "original-length 7")
     writeln!(mut out, "choices 1 0 2 1 2 2 1 1 2 1 2 2")
-    writeln!(mut out, "op Grant(agent=2)")
-    writeln!(mut out, "op Execute(agent=2)")
-    writeln!(mut out, "op Revoke(agent=2)")
-    writeln!(mut out, "op Execute(agent=2)")
+    writeln!(mut out, "op run \"Grant(agent=2)\"")
+    writeln!(mut out, "op run \"Execute(agent=2)\"")
+    writeln!(mut out, "op run \"Revoke(agent=2)\"")
+    writeln!(mut out, "op run \"Execute(agent=2)\"")
     writeln!(
         mut out,
         "violation revoked_agent_cannot_execute: an agent without a current grant was allowed to execute",

@@ -396,9 +396,7 @@ fn replay_never_reads_an_error_as_success() {
         },
         case,
     )
-    // Reading fewer choices than recorded is drift (kind 4); either way it
-    // is neither reproduced nor fixed.
-    assert!(!outcome.is_reproduced() && outcome.kind() != 1)
+    assert!(outcome.kind() == 2)
 }
 
 #[test]
@@ -548,13 +546,14 @@ fn schema_1_files_still_replay() {
     // A legacy file replays with the caller's settings.
     let (outcome, _) = replay_machine(buggy(), steps(30, 8), old)
     assert!(outcome.is_reproduced())
-    // Re-encoding upgrades it to the current schema with explicit steps.
-    let upgraded = parse(encode(old))
-    assert!(upgraded.schema == 3 && upgraded.has_steps)
+    let saved = parse(encode(old))
+    assert!(
+        saved.schema == 1 && !saved.has_steps && saved.producer == "0.1.0",
+    )
     // A schema-2 file without its `steps` line is rejected.
     assert!(
         parse_fails(
-            "fecheck-case 2\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices\nviolation v\nend\n",
+            "fecheck-case 2\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices 1\nop Inc\nviolation v\nend\n",
         ),
     )
     assert!(

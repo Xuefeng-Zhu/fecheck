@@ -17,14 +17,14 @@
 use core::{MemBuffer, MemVec}
 use super::source::{Source, copy_choices, DEFAULT_MAX_CHOICES}
 use super::verdict::Verdict
-use super::artifact::{Case, LEGACY_STEPS_MAX, LEGACY_STEPS_MEAN}
+use super::artifact::{Case, SCHEMA_VERSION, FECHECK_VERSION, LEGACY_STEPS_MAX, LEGACY_STEPS_MEAN}
 use super::machine::{
     StateMachine,
     EffectfulMachine,
     Steps,
     Trace,
-    run_traced,
-    run_traced_with,
+    trace_recording,
+    trace_recording_with,
     steps as make_steps,
     NO_STEP,
 }
@@ -70,14 +70,17 @@ uses F::E
 {
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let v = test(mut src)
-    // A clamped choice means the file or the generator changed.
-    if src.clamped() != 0 {
+    if src.overran() || src.problem() != 0 || v.is_discard() {
+        return ReplayOutcome::Invalid
+    }
+    if src.clamped() != 0 || src.past_end() != 0 {
         return ReplayOutcome::Drift { step: NO_STEP }
     }
-    // A reproduction must read exactly the recorded choices: none left over
-    // (a property that reads fewer, or none, is not the recorded run) and
-    // none supplied past the end (a file missing its last choices).
-    if v.is_failure() && (src.unread() != 0 || src.past_end() != 0) {
+    // A new failure can stop before consuming the original failing inputs.
+    if v.is_failure() && !v.same_failure(case.verdict) {
+        return ReplayOutcome::DifferentFailure { verdict: v, step: NO_STEP }
+    }
+    if !src.exact() {
         return ReplayOutcome::Drift { step: NO_STEP }
     }
     classify(v, src.overran(), NO_STEP, case)
@@ -97,53 +100,41 @@ pub fn op_text(_ command: MemBuffer, _ skipped: bool) -> MemBuffer {
 /// The prefix of a skipped step's `op` line.
 pub const SKIPPED_PREFIX: String<10> = "(skipped) "
 
-/// Checks a regenerated trace against the case before it is classified.
-/// Returns `Some(drift)` when they disagree.
-fn trace_drift(
-    _ case: Case,
-    _ trace: Trace,
-    _ clamped: u64,
-    _ past_end: u64,
-    _ unread: usize,
-    _ overran: bool,
-) -> Option<ReplayOutcome> {
-    if clamped != 0 {
-        return Option::Some(ReplayOutcome::Drift { step: 0 })
-    }
-    // Every recorded op must be regenerated, in order and verbatim, and
-    // nothing more: the regenerated trace has exactly the recorded length.
-    // Schema 3 also records which steps the precondition skipped.
+/// Check the common prefix before interpreting an early verdict. Only a
+/// passing or reproduced run must cover the entire recording.
+fn machine_outcome(_ case: Case, _ trace: Trace, _ src: Source) -> ReplayOutcome {
     var i: usize = 0
-    while i < case.ops.len() {
-        if i >= trace.steps.len() {
-            return Option::Some(ReplayOutcome::Drift { step: i.downcast_saturate() })
+    while i < case.ops.len() && i < trace.steps.len() {
+        let step = i.downcast_saturate()
+        let skipped = trace.steps[i].skipped
+        if case.schema >= 4 && skipped != case.skipped[i] {
+            return ReplayOutcome::Drift { step }
         }
-        let skipped = case.schema >= 3 && trace.steps[i].skipped
-        if op_text(format!(trace.steps[i].command), skipped) != case.ops[i] {
-            return Option::Some(ReplayOutcome::Drift { step: i.downcast_saturate() })
+        // Schema 3 cannot distinguish a literal prefix from a skip marker.
+        if case.schema == 3 && case.ops[i].span().starts_with(SKIPPED_PREFIX) {
+            return ReplayOutcome::Drift { step }
+        }
+        if trace.steps[i].command != case.ops[i] || (step == case.failed_step && skipped) {
+            return ReplayOutcome::Drift { step }
         }
         i += 1
     }
-    if trace.steps.len() != case.ops.len() {
-        return Option::Some(
-            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
-        )
+    if src.overran() || src.problem() != 0 || trace.verdict.is_discard() {
+        return ReplayOutcome::Invalid
     }
-    // Every recorded choice must be read: unread choices mean the file and
-    // the generator disagree. (Reads past the end return 0, which stops the
-    // sequence; a fixed target that passes the last recorded operation makes
-    // exactly one such read, so past-end reads only disqualify a failure.)
-    if !overran && unread != 0 {
-        return Option::Some(
-            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
-        )
+    if trace.repaired_step != NO_STEP {
+        return ReplayOutcome::Drift { step: trace.repaired_step }
     }
-    if !trace.verdict.is_pass() && past_end != 0 {
-        return Option::Some(
-            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
-        )
+    if trace.verdict.is_failure() && trace.failed_step < case.failed_step {
+        return ReplayOutcome::DifferentFailure { verdict: trace.verdict, step: trace.failed_step }
     }
-    Option::None
+    if i != case.ops.len()
+        || i != trace.steps.len()
+        || !src.exact()
+        || trace.command_end != case.choices.len() {
+        return ReplayOutcome::Drift { step: i.downcast_saturate() }
+    }
+    classify(trace.verdict, false, trace.failed_step, case)
 }
 
 /// The generation settings to replay `case` with: the recorded ones, or the
@@ -165,27 +156,17 @@ pub fn replay_machine<M: StateMachine>(_ machine: M, _ fallback: Steps, _ case: 
     ReplayOutcome,
     Trace,
 ) {
+    if !case.valid_machine_failure() {
+        return (ReplayOutcome::Invalid, Trace::new())
+    }
     let s = if case.has_steps {
         case_steps(case)
     } else {
         fallback
     }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
-    let trace = run_traced(machine, mut src, s)
-    match trace_drift(
-        case,
-        trace,
-        src.clamped(),
-        src.past_end(),
-        src.unread(),
-        src.overran(),
-    ) {
-        Option::Some(d) => {
-            return (d, trace)
-        },
-        Option::None => {},
-    }
-    let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
+    let trace = trace_recording(machine, mut src, s)
+    let outcome = machine_outcome(case, trace, src)
     (outcome, trace)
 }
 
@@ -199,27 +180,17 @@ pub fn replay_machine_with<M: EffectfulMachine>(_ machine: M, _ fallback: Steps,
 )
 uses (env: mut M::Env)
 {
+    if !case.valid_machine_failure() {
+        return (ReplayOutcome::Invalid, Trace::new())
+    }
     let s = if case.has_steps {
         case_steps(case)
     } else {
         fallback
     }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
-    let trace = run_traced_with(machine, mut src, s)
-    match trace_drift(
-        case,
-        trace,
-        src.clamped(),
-        src.past_end(),
-        src.unread(),
-        src.overran(),
-    ) {
-        Option::Some(d) => {
-            return (d, trace)
-        },
-        Option::None => {},
-    }
-    let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
+    let trace = trace_recording_with(machine, mut src, s)
+    let outcome = machine_outcome(case, trace, src)
     (outcome, trace)
 }
 
@@ -256,11 +227,14 @@ pub fn machine_case(
     _ trace: Trace,
 ) -> Case {
     var ops: MemVec<MemBuffer> = MemVec::new()
+    var skipped: MemVec<bool> = MemVec::new()
     for ref step in trace.steps {
-        ops.push(op_text(format!(step.command), step.skipped))
+        ops.push(format!(step.command))
+        skipped.push(step.skipped)
     }
     Case {
-        schema: 3,
+        schema: SCHEMA_VERSION,
+        producer: format!(FECHECK_VERSION),
         test,
         target,
         compiler,
@@ -276,6 +250,7 @@ pub fn machine_case(
         original_length,
         choices: copy_choices(choices),
         ops,
+        skipped,
         violation: format!(trace.explanation),
     }
 }

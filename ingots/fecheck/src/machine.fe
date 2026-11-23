@@ -127,6 +127,10 @@ pub struct Trace {
     pub skipped: u64,
     /// Explanation of the failure, if any.
     pub explanation: MemBuffer,
+    /// First operation whose continuation or operands required repair.
+    pub repaired_step: u64,
+    /// Choice boundary immediately after the last generated command.
+    pub command_end: usize,
 }
 
 impl Trace {
@@ -138,6 +142,8 @@ impl Trace {
             executed: 0,
             skipped: 0,
             explanation: MemBuffer::new(0),
+            repaired_step: NO_STEP,
+            command_end: 0,
         }
     }
 
@@ -150,13 +156,19 @@ impl Trace {
 /// Runs one command sequence drawn from `src`. Returns the verdict.
 pub fn run_steps<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps) -> Verdict {
     var trace = Trace::new()
-    execute(machine, mut src, steps, mut trace, false)
+    execute(machine, mut src, steps, mut trace, false, false)
 }
 
 /// Runs one command sequence drawn from `src` and records every step.
 pub fn run_traced<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps) -> Trace {
     var trace = Trace::new()
-    let _ = execute(machine, mut src, steps, mut trace, true)
+    let _ = execute(machine, mut src, steps, mut trace, true, false)
+    trace
+}
+
+pub fn trace_recording<M: StateMachine>(_ machine: M, _ src: mut Source, _ steps: Steps) -> Trace {
+    var trace = Trace::new()
+    let _ = execute(machine, mut src, steps, mut trace, true, true)
     trace
 }
 
@@ -166,6 +178,7 @@ fn execute<M: StateMachine>(
     _ steps: Steps,
     _ trace: mut Trace,
     _ record: bool,
+    _ strict: bool,
 ) -> Verdict {
     if steps.problem() != 0 {
         src.reject_config(INVALID_STEPS)
@@ -177,10 +190,23 @@ fn execute<M: StateMachine>(
     var index: u64 = 0
     var verdict = Verdict::Pass
     while index < steps.max {
-        if !src.draw_weighted(steps.mean, continue_odds(steps.mean)) {
+        // A failure records no stop flag. Strict replay may end here, but
+        // never supply a missing operand or consume an extra saved stop flag.
+        if strict && src.unread() == 0 {
             break
         }
+        let more = src.draw_weighted(steps.mean, continue_odds(steps.mean))
+        if strict && src.clamped() != 0 && trace.repaired_step == NO_STEP {
+            trace.repaired_step = index
+        }
+        if !more { break }
         let cmd = machine.gen_cmd(mut src, model)
+        if strict {
+            trace.command_end = src.len()
+            if (src.clamped() != 0 || src.past_end() != 0) && trace.repaired_step == NO_STEP {
+                trace.repaired_step = index
+            }
+        }
         if src.overran() || src.problem() != 0 {
             break
         }
@@ -297,7 +323,7 @@ pub fn run_steps_with<M: EffectfulMachine>(
 uses (env: mut M::Env)
 {
     var trace = Trace::new()
-    execute_with(machine, mut src, steps, mut trace, false)
+    execute_with(machine, mut src, steps, mut trace, false, false)
 }
 
 /// `run_traced` for an `EffectfulMachine`.
@@ -309,7 +335,19 @@ pub fn run_traced_with<M: EffectfulMachine>(
 uses (env: mut M::Env)
 {
     var trace = Trace::new()
-    let _ = execute_with(machine, mut src, steps, mut trace, true)
+    let _ = execute_with(machine, mut src, steps, mut trace, true, false)
+    trace
+}
+
+pub fn trace_recording_with<M: EffectfulMachine>(
+    _ machine: M,
+    _ src: mut Source,
+    _ steps: Steps,
+) -> Trace
+uses (env: mut M::Env)
+{
+    var trace = Trace::new()
+    let _ = execute_with(machine, mut src, steps, mut trace, true, true)
     trace
 }
 
@@ -322,6 +360,7 @@ fn execute_with<M: EffectfulMachine>(
     _ steps: Steps,
     _ trace: mut Trace,
     _ record: bool,
+    _ strict: bool,
 ) -> Verdict
 uses (env: mut M::Env)
 {
@@ -335,10 +374,23 @@ uses (env: mut M::Env)
     var index: u64 = 0
     var verdict = Verdict::Pass
     while index < steps.max {
-        if !src.draw_weighted(steps.mean, continue_odds(steps.mean)) {
+        // A failure records no stop flag. Strict replay may end here, but
+        // never supply a missing operand or consume an extra saved stop flag.
+        if strict && src.unread() == 0 {
             break
         }
+        let more = src.draw_weighted(steps.mean, continue_odds(steps.mean))
+        if strict && src.clamped() != 0 && trace.repaired_step == NO_STEP {
+            trace.repaired_step = index
+        }
+        if !more { break }
         let cmd = machine.gen_cmd(mut src, model)
+        if strict {
+            trace.command_end = src.len()
+            if (src.clamped() != 0 || src.past_end() != 0) && trace.repaired_step == NO_STEP {
+                trace.repaired_step = index
+            }
+        }
         if src.overran() || src.problem() != 0 {
             break
         }

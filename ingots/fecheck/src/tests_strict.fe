@@ -249,7 +249,7 @@ fn contradictory_case_files_are_rejected() {
     // Unusable generation settings.
     assert!(
         rejected(
-                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 0 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices 3\nviolation v\nend\n",
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 0 12\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices 3\nop Inc\nviolation v\nend\n",
             )
             == 100 + INCONSISTENT_STEPS,
     )
