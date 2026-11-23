@@ -24,20 +24,23 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|
-| `ingots/fecheck` (core) | 50 passed, 0 failed | not run on this host (see note) |
-| `examples/permissions` (Demo A) | 5 passed | not run on this host |
-| `examples/queue` (Demo B) | 5 passed | not run on this host |
+| `ingots/fecheck` (core) | 50 passed, 0 failed | 50 passed, 0 failed (CI) |
+| `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
+| `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
 | `examples/contract` (Demo C) | 5 passed | n/a (EVM contract) |
 | `examples/external` (copied outside the repo) | 3 passed | |
 | `scripts/contract-demo.sh` | shrunk case fails on Cached, passes on Fixed | |
 | `scripts/cli-checks.sh` (native CLI, built from the clone) | | 41 of 41 checks passed |
 | `fe fmt --check` (all six ingots) | clean | |
 
-Note: this host is AArch64 Linux, where Fe 26.6 has no native backend. The CLI
-was built and run with an x86-64 Fe under qemu-user; `fe test --backend
-native` cannot run there because it executes the x86 test binary directly.
-The CI workflow runs the native suites on `ubuntu-latest`; until it has run,
-native test results for this commit are unverified. (0.1.0 passed them.)
+Native results come from GitHub Actions (`ubuntu-latest`, x86-64), which runs
+`./scripts/test.sh` on every push. Run
+[45103740959](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45103740959)
+on commit `caa2a56` passed every step: format check, all EVM and native
+suites, the external ingot, Demo C and 41 of 41 CLI checks. The raw log is in
+`docs/evidence/ci-run-caa2a56.txt`. The development host was AArch64 Linux,
+where Fe 26.6 has no native backend; there the CLI was built with an x86-64 Fe
+under qemu-user and the native `fe test` suites were left to CI.
 
 ## What the core tests cover (`ingots/fecheck/src/tests_*.fe`)
 

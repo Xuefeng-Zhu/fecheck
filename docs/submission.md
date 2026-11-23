@@ -29,10 +29,11 @@ candidate, inside plain `fe test`. Only the CLI file declares `Stdout`,
 
 ## Required details
 
-* Repository: https://github.com/Xuefeng-Zhu/fecheck (private until the owner makes it public)
+* Repository: https://github.com/Xuefeng-Zhu/fecheck
 * License: Apache-2.0
 * Compiler: `fe 26.6.0 (5b3f96a)`
-* Commit SHA: see `git rev-parse HEAD` (recorded in the final handoff)
+* Commit SHA: the full SHA given in the submission form
+* CI: https://github.com/Xuefeng-Zhu/fecheck/actions (EVM and native suites, Demo C, CLI checks)
 * Project manifest: `fe.toml` (workspace) and each ingot's `fe.toml`
 
 ## Pre-existing work and reuse
@@ -46,29 +47,8 @@ reference) and Hypothesis's choice-sequence reduction (MacIver, Donaldson
 
 ## AI assistance
 
-This project was built with substantial AI assistance (an AI coding agent
-operating in a sandbox under the entrant's direction). The agent read the Fe
-26.6 documentation and standard-library sources, wrote the Fe code, tests,
-scripts and documentation, and compiled and ran everything against the real
-compiler. The entrant is the responsible human contact and should review the
-code before submission so they can explain it to the judges, as the contest
-rules require.
-
-## Readiness checklist
-
-| Item | Status | Evidence |
-|---|---|---|
-| Core in compiling Fe | yes | `ingots/fecheck`, `fe test` passes on Sonatina and native |
-| Property exercised on generated input | yes | `tests_core.fe` |
-| Genuine failure detected | yes | Demos A, B, C find their bugs from random seeds |
-| Failure shrunk | yes | 7 -> 4 ops (permissions), 20 -> 8 ops (queue) at seed 12345 |
-| Deterministic replay | yes | `cli-checks.sh` determinism and replay checks |
-| Fixed implementation no longer reproduces | yes | replay `--against permissions-fixed` / `queue-fixed` exit 3; checked-in regression tests |
-| Two independent examples | yes (three) | permissions, queue, contract |
-| Automated tests pass | yes | `docs/testing.md`, `docs/evidence/test-run.txt` |
-| Documented, verified commands | yes | README, `scripts/` |
-| OSI license and disclosures | yes | `LICENSE`, this file |
-| README explains scope and gaps | yes | README, `docs/limitations.md` |
-| No credentials needed | yes | |
-| Registration (closed 2026-11-17 23:59 UTC) | **unknown: entrant must confirm** | |
-| Public repository and submission form | **not done: needs the entrant** | |
+FeCheck was built with substantial help from an AI coding agent. I set the
+direction, scope and design decisions; the agent read the Fe 26.6 docs and
+standard-library sources, drafted the Fe code, tests, scripts and docs, and
+compiled and ran everything against the real compiler. I reviewed the code
+and can walk through any part of it.
