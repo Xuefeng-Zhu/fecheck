@@ -61,6 +61,7 @@ const EXIT_USAGE: i32 = 2
 const EXIT_NOT_REPRODUCED: i32 = 3
 const EXIT_BAD_CASE: i32 = 4
 const EXIT_DIFFERENT_FAILURE: i32 = 5
+const EXIT_WRITE_FAILED: i32 = 6
 
 /// Command-line options shared by the subcommands.
 struct Options {
@@ -140,7 +141,10 @@ fn usage() uses (out: mut Stdout) {
         "exit status: 0 ok/reproduced, 1 property failed, 2 usage error, 3 replay passes (fixed),",
     )
     println!(
-        "             4 bad case file or drift, 5 replay failed differently",
+        "             4 bad case file or drift, 5 replay failed differently,",
+    )
+    println!(
+        "             6 the property failed but the case or JSON file could not be written",
     )
 }
 
@@ -223,6 +227,10 @@ fn parse_options(_ first: usize) -> Options uses (out: mut Stdout, args: Args) {
             return opts
         }
         i += 2
+    }
+    if opts.save.len() > 0 && opts.save.span() == opts.json.span() {
+        println!("fecheck: --save and --json must name different files")
+        opts.error = true
     }
     opts
 }
@@ -326,6 +334,18 @@ uses (out: mut Stdout, fs: mut Fs)
             )
             return EXIT_FAILED
         },
+        Status::Unstable => {
+            println!()
+            println!(
+                "Unstable: case ",
+                report.failing_case + 1,
+                " failed, then passed or failed differently when rerun on the same choices.",
+            )
+            println!(
+                "The test is nondeterministic; nothing was shrunk or saved.",
+            )
+            return EXIT_FAILED
+        },
         Status::Failed => {},
     }
 
@@ -388,6 +408,7 @@ uses (out: mut Stdout, fs: mut Fs)
     if opts.save.len() == 0 {
         let _ = fs.create_dir_all(format!(opts.dir))
     }
+    var wrote = true
     match fs.write(format!(path), encode(case).span()) {
         Result::Ok(_) => {
             println!("Replay artifact:")
@@ -395,21 +416,35 @@ uses (out: mut Stdout, fs: mut Fs)
             println!("Reproduce with:")
             println!("  fecheck replay ", path)
         },
-        Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
+        Result::Err(e) => {
+            println!("fecheck: could not write ", path, ": ", e)
+            wrote = false
+        },
     }
     if opts.json.len() > 0 {
-        write_json(opts.json.span(), case, trace)
+        if !write_json(opts.json.span(), case, trace) {
+            wrote = false
+        }
     }
     print_snippet(case, s)
+    if !wrote {
+        return EXIT_WRITE_FAILED
+    }
     EXIT_FAILED
 }
 
-fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace)
+fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace) -> bool
 uses (out: mut Stdout, fs: mut Fs)
 {
     match fs.write(format!(path), case_json(case, trace).span()) {
-        Result::Ok(_) => println!("Trace JSON: ", path),
-        Result::Err(e) => println!("fecheck: could not write ", path, ": ", e),
+        Result::Ok(_) => {
+            println!("Trace JSON: ", path)
+            true
+        },
+        Result::Err(e) => {
+            println!("fecheck: could not write ", path, ": ", e)
+            false
+        },
     }
 }
 
@@ -605,16 +640,16 @@ uses (out: mut Stdout, fs: mut Fs)
         )
     }
     if target == "permissions" {
-        return finish_replay(against_cached(), s, case, opts)
+        return finish_replay(against_cached(), s, case, target.span(), opts)
     }
     if target == "permissions-fixed" {
-        return finish_replay(against_fixed(), s, case, opts)
+        return finish_replay(against_fixed(), s, case, target.span(), opts)
     }
     if target == "queue" {
-        return finish_replay(against_masked(), s, case, opts)
+        return finish_replay(against_masked(), s, case, target.span(), opts)
     }
     if target == "queue-fixed" {
-        return finish_replay(against_mod(), s, case, opts)
+        return finish_replay(against_mod(), s, case, target.span(), opts)
     }
     println!(
         "fecheck: unknown target `",
@@ -628,6 +663,7 @@ fn finish_replay<M: StateMachine + Copy>(
     _ machine: M,
     _ s: Steps,
     _ case: Case,
+    _ target: MemSpan,
     _ opts: Options,
 ) -> i32
 uses (out: mut Stdout, fs: mut Fs)
@@ -636,7 +672,21 @@ uses (out: mut Stdout, fs: mut Fs)
     println!()
     print_trace("Replayed:", trace)
     if opts.json.len() > 0 {
-        write_json(opts.json.span(), case, trace)
+        // The JSON describes this replay: its target, trace and verdict,
+        // with the recorded case's provenance (seed, case index).
+        let replayed = machine_case(
+            test: format!(case.test),
+            target: format!(target),
+            compiler: format!(case.compiler),
+            seed: case.seed,
+            case_index: case.case_index,
+            cases: case.cases,
+            steps: s,
+            original_length: case.original_length,
+            copy_choices(case.choices),
+            trace,
+        )
+        let _ = write_json(opts.json.span(), replayed, trace)
     }
     println!()
     match outcome {

@@ -5,7 +5,7 @@
 // simpler values*; it never needs a shrinker of its own.
 
 use core::MemVec
-use super::source::Source
+use super::source::{Source, continue_odds}
 
 /// A generator of `Out` values.
 pub trait Gen {
@@ -127,7 +127,7 @@ impl<G: Gen> Gen for VecOf<G> {
     fn generate(self, _ src: mut Source) -> MemVec<G::Out> {
         var out: MemVec<G::Out> = MemVec::new()
         while out.len() < self.max_len {
-            if !src.draw_weighted(self.mean_len, self.mean_len + 1) {
+            if !src.draw_weighted(self.mean_len, continue_odds(self.mean_len)) {
                 break
             }
             out.push(self.elem.generate(mut src))

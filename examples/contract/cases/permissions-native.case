@@ -1,5 +1,5 @@
 # FeCheck regression case. Replay with: fecheck replay <this file>
-fecheck-case 2
+fecheck-case 3
 test revoked_agent_cannot_execute
 target permissions
 compiler fe 26.6.0

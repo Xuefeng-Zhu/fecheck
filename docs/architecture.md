@@ -78,7 +78,9 @@ because it fits Fe unusually well:
 of candidate evaluations is spent:
 
 1. delete runs of 8, 7, ..., 1 consecutive choices;
-2. lower each choice: try 0, then binary-search the smallest failing value;
+2. lower each choice: try 0, then binary-search for a smaller failing value
+   (this assumes failure is monotone in that choice, so it can miss a smaller
+   one);
 3. lower adjacent pairs together.
 
 A candidate is adopted only if (a) it fails with the same verdict kind and
@@ -109,8 +111,8 @@ fresh deployment per run via `evm.create`.
 
 ## Replay and artifacts
 
-`.case` files are line-oriented, versioned text (schema 2, see
-`artifact.fe`; schema 1 is still read). They carry the shrunk choices (the
+`.case` files are line-oriented, versioned text (schema 3, see
+`artifact.fe`; schemas 1 and 2 are still read). They carry the shrunk choices (the
 replay input), the generation settings (`steps <max> <mean>`), provenance
 (seed, case index, compiler) and the expected outcome (verdict, failed step,
 rendered ops, violation). Replay runs with the recorded settings and checks

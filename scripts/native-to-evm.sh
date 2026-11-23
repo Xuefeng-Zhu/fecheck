@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Find natively, confirm on chain.
+# Find natively, confirm on the `fe test` EVM.
 #
 #   ./scripts/native-to-evm.sh        (needs out/fecheck, fe 26.6.0, python3)
 #

@@ -70,7 +70,80 @@ uses F::E
 {
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let v = test(mut src)
+    // A clamped choice means the file or the generator changed.
+    if src.clamped() != 0 {
+        return ReplayOutcome::Drift { step: NO_STEP }
+    }
+    // A reproduction must read exactly the recorded choices: none left over
+    // (a property that reads fewer, or none, is not the recorded run) and
+    // none supplied past the end (a file missing its last choices).
+    if v.is_failure() && (src.unread() != 0 || src.past_end() != 0) {
+        return ReplayOutcome::Drift { step: NO_STEP }
+    }
     classify(v, src.overran(), NO_STEP, case)
+}
+
+/// The `op` line for a step: its command, marked when the precondition
+/// skipped it (schema 3), so replay can tell a skipped command from an
+/// executed one.
+pub fn op_text(_ command: MemBuffer, _ skipped: bool) -> MemBuffer {
+    if skipped {
+        format!(SKIPPED_PREFIX, command)
+    } else {
+        format!(command)
+    }
+}
+
+/// The prefix of a skipped step's `op` line.
+pub const SKIPPED_PREFIX: String<10> = "(skipped) "
+
+/// Checks a regenerated trace against the case before it is classified.
+/// Returns `Some(drift)` when they disagree.
+fn trace_drift(
+    _ case: Case,
+    _ trace: Trace,
+    _ clamped: u64,
+    _ past_end: u64,
+    _ unread: usize,
+    _ overran: bool,
+) -> Option<ReplayOutcome> {
+    if clamped != 0 {
+        return Option::Some(ReplayOutcome::Drift { step: 0 })
+    }
+    // Every recorded op must be regenerated, in order and verbatim, and
+    // nothing more: the regenerated trace has exactly the recorded length.
+    // Schema 3 also records which steps the precondition skipped.
+    var i: usize = 0
+    while i < case.ops.len() {
+        if i >= trace.steps.len() {
+            return Option::Some(ReplayOutcome::Drift { step: i.downcast_saturate() })
+        }
+        let skipped = case.schema >= 3 && trace.steps[i].skipped
+        if op_text(format!(trace.steps[i].command), skipped) != case.ops[i] {
+            return Option::Some(ReplayOutcome::Drift { step: i.downcast_saturate() })
+        }
+        i += 1
+    }
+    if trace.steps.len() != case.ops.len() {
+        return Option::Some(
+            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
+        )
+    }
+    // Every recorded choice must be read: unread choices mean the file and
+    // the generator disagree. (Reads past the end return 0, which stops the
+    // sequence; a fixed target that passes the last recorded operation makes
+    // exactly one such read, so past-end reads only disqualify a failure.)
+    if !overran && unread != 0 {
+        return Option::Some(
+            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
+        )
+    }
+    if !trace.verdict.is_pass() && past_end != 0 {
+        return Option::Some(
+            ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() },
+        )
+    }
+    Option::None
 }
 
 /// The generation settings to replay `case` with: the recorded ones, or the
@@ -99,27 +172,18 @@ pub fn replay_machine<M: StateMachine>(_ machine: M, _ fallback: Steps, _ case: 
     }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let trace = run_traced(machine, mut src, s)
-    // Every recorded op must be regenerated, in order and verbatim, and
-    // nothing more: the regenerated trace has exactly the recorded length.
-    var i: usize = 0
-    while i < case.ops.len() {
-        if i >= trace.steps.len() {
-            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
-        }
-        if trace.steps[i].command != case.ops[i] {
-            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
-        }
-        i += 1
-    }
-    if trace.steps.len() != case.ops.len() {
-        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
-    }
-    // Every recorded choice must be read: unread choices mean the file and
-    // the generator disagree. (Reads past the end return 0, which stops the
-    // sequence; a fixed target that passes the last recorded operation makes
-    // exactly one such read.)
-    if !src.overran() && src.unread() != 0 {
-        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
+    match trace_drift(
+        case,
+        trace,
+        src.clamped(),
+        src.past_end(),
+        src.unread(),
+        src.overran(),
+    ) {
+        Option::Some(d) => {
+            return (d, trace)
+        },
+        Option::None => {},
     }
     let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
     (outcome, trace)
@@ -142,21 +206,18 @@ uses (env: mut M::Env)
     }
     var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
     let trace = run_traced_with(machine, mut src, s)
-    var i: usize = 0
-    while i < case.ops.len() {
-        if i >= trace.steps.len() {
-            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
-        }
-        if trace.steps[i].command != case.ops[i] {
-            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
-        }
-        i += 1
-    }
-    if trace.steps.len() != case.ops.len() {
-        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
-    }
-    if !src.overran() && src.unread() != 0 {
-        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
+    match trace_drift(
+        case,
+        trace,
+        src.clamped(),
+        src.past_end(),
+        src.unread(),
+        src.overran(),
+    ) {
+        Option::Some(d) => {
+            return (d, trace)
+        },
+        Option::None => {},
     }
     let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
     (outcome, trace)
@@ -196,10 +257,10 @@ pub fn machine_case(
 ) -> Case {
     var ops: MemVec<MemBuffer> = MemVec::new()
     for ref step in trace.steps {
-        ops.push(format!(step.command))
+        ops.push(op_text(format!(step.command), step.skipped))
     }
     Case {
-        schema: 2,
+        schema: 3,
         test,
         target,
         compiler,

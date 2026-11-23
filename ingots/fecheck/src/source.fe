@@ -17,10 +17,22 @@
 //
 // A replayed choice larger than the bound of the draw that reads it is
 // clamped to that bound, and a draw past the end of the recorded choices
-// returns 0, the simplest choice. Both keep edited sequences valid.
+// returns 0, the simplest choice. Both keep the shrinker's edited sequences
+// valid. The source counts both, and replay of a saved case treats either
+// as a sign the file or the generator changed (see replay.fe).
 
 use core::MemVec
 use super::rng::SplitMix64
+
+/// The denominator for "continue with probability `mean / (mean + 1)`",
+/// saturating so a huge `mean` can't overflow (`u64::MAX` means "always").
+pub fn continue_odds(_ mean: u64) -> u64 {
+    if mean == 0xFFFFFFFFFFFFFFFF {
+        mean
+    } else {
+        mean + 1
+    }
+}
 
 /// Hard upper bound on the choices one test case may draw.
 pub const DEFAULT_MAX_CHOICES: usize = 4096
@@ -33,6 +45,10 @@ pub struct Source {
     recorded: MemVec<u64>,
     max_choices: usize,
     overrun: bool,
+    /// Replayed choices that exceeded their draw's bound and were clamped.
+    clamped: u64,
+    /// Draws made after the recorded choices ran out (each returned 0).
+    past_end: u64,
 }
 
 impl Source {
@@ -46,6 +62,8 @@ impl Source {
             recorded: MemVec::new(),
             max_choices,
             overrun: false,
+            clamped: 0,
+            past_end: 0,
         }
     }
 
@@ -59,6 +77,8 @@ impl Source {
             recorded: MemVec::new(),
             max_choices,
             overrun: false,
+            clamped: 0,
+            past_end: 0,
         }
     }
 
@@ -75,7 +95,12 @@ impl Source {
             if self.pos < self.prefix.len() {
                 value = self.prefix[self.pos]
                 self.pos += 1
-                if value > max { value = max }
+                if value > max {
+                    value = max
+                    self.clamped += 1
+                }
+            } else {
+                self.past_end += 1
             }
         } else {
             value = self.rng.up_to(max)
@@ -118,6 +143,17 @@ impl Source {
     /// How many choices have been drawn so far.
     pub fn len(self) -> usize {
         self.recorded.len()
+    }
+
+    /// How many replayed choices were above their draw's bound (clamped).
+    /// The shrinker relies on clamping; strict replay treats it as damage.
+    pub fn clamped(self) -> u64 {
+        self.clamped
+    }
+
+    /// How many draws came after the recorded choices ran out.
+    pub fn past_end(self) -> u64 {
+        self.past_end
     }
 
     /// How many recorded choices a replaying source has not read yet.

@@ -38,8 +38,9 @@
 use core::{MemBuffer, MemSpan, MemVec}
 use core::text::parse_uint
 use super::verdict::{Verdict, kind_name, verdict_from_parts}
+use super::machine::steps as make_steps
 
-pub const SCHEMA_VERSION: u64 = 2
+pub const SCHEMA_VERSION: u64 = 3
 /// The oldest schema this FeCheck still reads.
 pub const MIN_SCHEMA_VERSION: u64 = 1
 pub const FECHECK_VERSION: String<5> = "0.2.0"
@@ -88,7 +89,17 @@ pub enum ParseError {
     TooManyOps,
     Truncated,
     TrailingData { pub line: u64 },
+    /// The fields parse but contradict each other (see `INCONSISTENT_*`).
+    Inconsistent { pub reason: u64 },
 }
+
+/// The verdict is `pass` or `discard`: a case file records a failure.
+pub const INCONSISTENT_VERDICT: u64 = 1
+/// A failed step is recorded but there is no `op` line for it, or `op`
+/// lines are recorded without a failed step.
+pub const INCONSISTENT_STEP: u64 = 2
+/// The recorded generation settings are unusable (`Steps::problem`).
+pub const INCONSISTENT_STEPS: u64 = 3
 
 impl ParseError {
     /// A one-line, human-readable reason.
@@ -133,6 +144,21 @@ impl ParseError {
                 "unexpected data after `end` on line ",
                 line,
             ),
+            ParseError::Inconsistent { reason } => {
+                if reason == INCONSISTENT_VERDICT {
+                    write!(
+                        mut out,
+                        "inconsistent case: the verdict must be `fail` or `error`",
+                    )
+                } else if reason == INCONSISTENT_STEP {
+                    write!(
+                        mut out,
+                        "inconsistent case: `failed-step` and the `op` lines disagree",
+                    )
+                } else {
+                    write!(mut out, "inconsistent case: unusable `steps` settings")
+                }
+            },
         }
     }
 }
@@ -461,6 +487,9 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
         } else if key_index == 14 {
             case.violation = format!(rest)
         } else if key_index == 15 {
+            if rest.len() != 0 {
+                return Result::Err(ParseError::TrailingData { line: line_no })
+            }
             ended = true
         }
         key_index += 1
@@ -470,6 +499,22 @@ pub fn decode(_ text: MemSpan) -> Result<ParseError, Case> {
             return Result::Err(ParseError::MissingHeader)
         }
         return Result::Err(ParseError::Truncated)
+    }
+    // The fields must describe one coherent failure.
+    let kind = case.verdict.kind()
+    if kind != 2 && kind != 3 {
+        return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_VERDICT })
+    }
+    if case.has_failed_step {
+        let n: u64 = case.ops.len().downcast_saturate()
+        if case.failed_step >= n {
+            return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEP })
+        }
+    } else if case.ops.len() != 0 {
+        return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEP })
+    }
+    if case.has_steps && make_steps(case.steps_max, case.steps_mean).problem() != 0 {
+        return Result::Err(ParseError::Inconsistent { reason: INCONSISTENT_STEPS })
     }
     Result::Ok(case)
 }

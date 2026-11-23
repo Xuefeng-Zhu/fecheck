@@ -30,11 +30,21 @@ Living list. Items are honest constraints of the current implementation.
   [argotorg/fe#2000](https://github.com/argotorg/fe/pull/2000); a minimal
   reproduction is in [fe-compatibility.md](fe-compatibility.md)), so the two executors are kept as
   copies; `effectful_and_pure_engines_agree` checks they produce identical
-  traces. The CLI and `.case` replay (`replay_machine`) cover pure machines
-  only, since the native CLI has no EVM; an effectful case replays inside
-  `fe test` with `run_traced_with`.
+  traces. The native CLI replays pure machines only, since it has no EVM; an
+  effectful machine replays a `.case` inside `fe test` with
+  `replay_machine_with`, which applies the same checks as `replay_machine`
+  (examples/contract/src/native_case.fe).
 * Command observations are compared with `Eq`; there is no generic diffing of
   model and SUT state.
+
+* **Shrinking is greedy and local.** Deleting runs, lowering single choices
+  (binary search, which assumes failure is monotone in that choice) and
+  lowering pairs reach a case no single such step can improve, not a global
+  minimum. A failure that needs two choices changed together in other ways
+  can stay larger than necessary.
+* Replay compares commands by their rendered text (`Display`), not
+  semantically, and the engine requires `Copy + Display` on commands and
+  observations.
 
 ## Demos D, E and F
 

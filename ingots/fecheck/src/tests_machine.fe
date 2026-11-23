@@ -148,6 +148,13 @@ fn parse(_ text: MemBuffer) -> Case {
     }
 }
 
+fn rejects(_ text: MemBuffer) -> bool {
+    match decode(text.span()) {
+        Result::Ok(_) => false,
+        Result::Err(_) => true,
+    }
+}
+
 fn parse_fails(_ text: DynString) -> bool {
     let buf = format!(text)
     match decode(buf.span()) {
@@ -389,7 +396,9 @@ fn replay_never_reads_an_error_as_success() {
         },
         case,
     )
-    assert!(outcome.kind() == 2)
+    // Reading fewer choices than recorded is drift (kind 4); either way it
+    // is neither reproduced nor fixed.
+    assert!(!outcome.is_reproduced() && outcome.kind() != 1)
 }
 
 #[test]
@@ -502,10 +511,9 @@ fn replay_rejects_a_case_missing_its_last_op() {
         i += 1
     }
     cut.ops = ops
-    let short = parse(encode(cut))
-    assert!(short.ops.len() + 1 == full_len)
-    let (outcome, _) = replay_machine(buggy(), steps(30, 8), short)
-    assert!(outcome.kind() == 4)
+    // The failing op is the last one, so the cut file names a failed step
+    // with no `op` line: the parser rejects it as inconsistent.
+    assert!(rejects(encode(cut)))
     // An extra, unrecorded trailing choice is drift too.
     var longer = parse(text)
     longer.choices.push(1)
@@ -542,7 +550,7 @@ fn schema_1_files_still_replay() {
     assert!(outcome.is_reproduced())
     // Re-encoding upgrades it to the current schema with explicit steps.
     let upgraded = parse(encode(old))
-    assert!(upgraded.schema == 2 && upgraded.has_steps)
+    assert!(upgraded.schema == 3 && upgraded.has_steps)
     // A schema-2 file without its `steps` line is rejected.
     assert!(
         parse_fails(

@@ -1,4 +1,4 @@
-// Find natively, confirm on chain.
+// Find natively, confirm on the `fe test` EVM.
 //
 // The registry logic is one Fe source (`permissions::registry_*`). Natively
 // it runs as Demo A, where the CLI can search millions of cases quickly;
@@ -149,7 +149,7 @@ pub fn native_case_text() -> MemBuffer {
         mut out,
         "# FeCheck regression case. Replay with: fecheck replay <this file>",
     )
-    writeln!(mut out, "fecheck-case 2")
+    writeln!(mut out, "fecheck-case 3")
     writeln!(mut out, "test revoked_agent_cannot_execute")
     writeln!(mut out, "target permissions")
     writeln!(mut out, "compiler fe 26.6.0")

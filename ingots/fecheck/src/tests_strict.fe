@@ -1,0 +1,327 @@
+// Regression tests for the 0.2.1 strictness fixes: each test reproduces a
+// defect found in review (it failed before the fix) and pins the new
+// behaviour.
+
+use core::{MemBuffer, MemVec}
+use core::abi::DynString
+use std::io::Display
+use ingot::source::{Source, copy_choices}
+use ingot::verdict::Verdict
+use ingot::gen::{Gen, VecOf, uint_in}
+use ingot::runner::{Config, check}
+use ingot::machine::{StateMachine, steps, run_steps, run_traced, INVALID_STEPS}
+use ingot::artifact::{
+    Case,
+    ParseError,
+    encode,
+    decode,
+    INCONSISTENT_VERDICT,
+    INCONSISTENT_STEP,
+    INCONSISTENT_STEPS,
+}
+use ingot::replay::{replay_machine, replay_property, machine_case}
+
+// ------------------------------------------------------------------ machine
+
+enum Cmd {
+    Inc,
+    Add { pub n: u64 },
+}
+impl Copy for Cmd {}
+impl Display for Cmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Cmd::Inc => write!(mut out, "Inc"),
+            Cmd::Add { n } => write!(mut out, "Add(", n, ")"),
+        }
+    }
+}
+
+/// A counter whose `Add` loses one unit when n > 50.
+struct M { reject_all: bool }
+impl Copy for M {}
+
+impl StateMachine for M {
+    type Cmd = Cmd
+    type Obs = u64
+    type Model = u64
+    type Sut = u64
+
+    fn new_model(self) -> u64 {
+        0
+    }
+    fn new_sut(self) -> u64 {
+        0
+    }
+    fn gen_cmd(self, _ src: mut Source, _ model: u64) -> Cmd {
+        if src.draw_bool() {
+            Cmd::Add { n: uint_in(0, 100).generate(mut src) }
+        } else {
+            Cmd::Inc
+        }
+    }
+    fn precondition(self, _ model: u64, _ cmd: Cmd) -> bool {
+        !self.reject_all
+    }
+    fn run_model(self, _ model: mut u64, _ cmd: Cmd) -> u64 {
+        match cmd {
+            Cmd::Inc => {
+                model += 1
+            },
+            Cmd::Add { n } => {
+                model += n
+            },
+        }
+        model
+    }
+    fn run_sut(self, _ sut: mut u64, _ cmd: Cmd) -> u64 {
+        match cmd {
+            Cmd::Inc => {
+                sut += 1
+            },
+            Cmd::Add { n } => {
+                if n > 50 { sut += n - 1 } else { sut += n }
+            },
+        }
+        sut
+    }
+    fn invariant(self, _ model: u64, _ sut: u64) -> Verdict {
+        Verdict::Pass
+    }
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        write!(mut out, "counter diverged")
+    }
+}
+
+fn found() -> Case {
+    let s = steps(30, 8)
+    let report = check(
+        |src: mut Source| run_steps(M { reject_all: false }, mut src, s),
+        Config::new(seed: 1, cases: 200),
+    )
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced(M { reject_all: false }, mut src, s)
+    let case = machine_case(
+        test: format!("counter"),
+        target: format!("m"),
+        compiler: format!("fe 26.6.0"),
+        seed: 1,
+        case_index: report.failing_case,
+        cases: 200,
+        steps: s,
+        original_length: 9,
+        report.shrunk,
+        trace,
+    )
+    reparse(case)
+}
+
+fn reparse(_ case: Case) -> Case {
+    let text = encode(case)
+    match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => panic(),
+    }
+}
+
+/// A failure the precondition now skips is drift, not "fixed".
+#[test]
+fn skipped_commands_are_not_a_fix() {
+    let case = found()
+    let (ok, _) = replay_machine(M { reject_all: false }, steps(30, 8), case)
+    assert!(ok.is_reproduced())
+    let (outcome, trace) = replay_machine(M { reject_all: true }, steps(30, 8), found())
+    assert!(trace.skipped > 0 && trace.executed == 0)
+    assert!(outcome.kind() == 4)
+}
+
+/// A replayed choice above its bound (a flag of 100 instead of 1) is drift.
+#[test]
+fn clamped_choices_are_drift() {
+    var case = found()
+    assert!(case.choices[0] == 1)
+    case.choices[0] = 100
+    let (outcome, _) = replay_machine(M { reject_all: false }, steps(30, 8), case)
+    assert!(outcome.kind() == 4)
+}
+
+// ------------------------------------------------------------------ property
+
+fn prop(_ src: mut Source) -> Verdict {
+    let a = src.draw(100)
+    let _b = src.draw(100)
+    if a >= 5 {
+        Verdict::Fail { code: 5 }
+    } else {
+        Verdict::Pass
+    }
+}
+
+fn property_case(_ choices: own MemVec<u64>) -> Case {
+    var case = found()
+    case.choices = choices
+    case.verdict = Verdict::Fail { code: 5 }
+    case.has_failed_step = false
+    case.ops = MemVec::new()
+    case
+}
+
+#[test]
+fn property_replay_is_exact() {
+    let report = check(
+        |src: mut Source| prop(mut src),
+        Config::new(seed: 2, cases: 100),
+    )
+    assert!(report.failed())
+    assert!(
+        report.shrunk.len() == 2 && report.shrunk[0] == 5 && report.shrunk[1] == 0,
+    )
+    assert!(
+        replay_property(
+            |src: mut Source| prop(mut src),
+            property_case(copy_choices(report.shrunk)),
+        )
+            .is_reproduced(),
+    )
+    // Missing its last choice (a 0): the replay would read it past the end.
+    var short: MemVec<u64> = MemVec::new()
+    short.push(5)
+    assert!(
+        replay_property(|src: mut Source| prop(mut src), property_case(short)).kind() == 4,
+    )
+    // A property that reads none of the recorded choices.
+    let constant = replay_property(
+        |src: mut Source| Verdict::Fail { code: 5 },
+        property_case(copy_choices(report.shrunk)),
+    )
+    assert!(constant.kind() == 4)
+    // A clamped choice.
+    var big: MemVec<u64> = MemVec::new()
+    big.push(500)
+    big.push(0)
+    assert!(
+        replay_property(|src: mut Source| prop(mut src), property_case(big)).kind() == 4,
+    )
+}
+
+// ------------------------------------------------------------------ parser
+
+fn rejected(_ text: DynString) -> u64 {
+    let buf = format!(text)
+    match decode(buf.span()) {
+        Result::Ok(_) => 0,
+        Result::Err(ParseError::Inconsistent { reason }) => 100 + reason,
+        Result::Err(ParseError::TrailingData { line }) => 200,
+        Result::Err(_) => 1,
+    }
+}
+
+#[test]
+fn contradictory_case_files_are_rejected() {
+    // Baseline: a well-formed property case parses.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices 3\nviolation v\nend\n",
+            )
+            == 0,
+    )
+    // A passing verdict (with a code) is not a recorded failure.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict pass 7\nfailed-step none\noriginal-length 1\nchoices 3\nviolation v\nend\n",
+            )
+            == 100 + INCONSISTENT_VERDICT,
+    )
+    // A failed step with no `op` lines.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step 0\noriginal-length 1\nchoices 3\nviolation v\nend\n",
+            )
+            == 100 + INCONSISTENT_STEP,
+    )
+    // `op` lines with no failed step.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices 3\nop Inc\nviolation v\nend\n",
+            )
+            == 100 + INCONSISTENT_STEP,
+    )
+    // Unusable generation settings.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 0 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices 3\nviolation v\nend\n",
+            )
+            == 100 + INCONSISTENT_STEPS,
+    )
+    // Junk on the `end` line.
+    assert!(
+        rejected(
+                "fecheck-case 3\ntest t\ntarget x\ncompiler c\nfecheck 0.2.0\nseed 1\ncase 0\ncases 1\nsteps 40 12\nverdict fail 1\nfailed-step none\noriginal-length 1\nchoices 3\nviolation v\nend junk\n",
+            )
+            == 200,
+    )
+}
+
+// ------------------------------------------------------------------ shrinker
+
+struct Flip { calls: u64 }
+
+/// Fails on its first call only: a nondeterministic test.
+fn flaky(_ src: mut Source) -> Verdict uses (flip: mut Flip) {
+    let _ = src.draw(10)
+    flip.calls += 1
+    if flip.calls == 1 {
+        Verdict::Fail { code: 9 }
+    } else {
+        Verdict::Pass
+    }
+}
+
+#[test]
+fn a_failure_that_does_not_reproduce_is_unstable() {
+    var flip = Flip { calls: 0 }
+    let report = with (flip) {
+        check(
+            |src: mut Source| flaky(mut src),
+            Config::new(seed: 1, cases: 10),
+        )
+    }
+    assert!(report.unstable())
+    assert!(!report.failed() && !report.passed())
+    assert!(report.exit_code() == 4)
+    assert!(
+        report.original_verdict.code() == 9 && report.shrunk_verdict.is_pass(),
+    )
+    // Confirmed once, never shrunk.
+    assert!(flip.calls == 2)
+}
+
+// ------------------------------------------------------------------ Steps
+
+#[test]
+fn unusable_steps_error_instead_of_passing() {
+    var src = Source::random(1, 4096)
+    let v = run_steps(M { reject_all: false }, mut src, steps(0, 12))
+    match v {
+        Verdict::Error { code } => assert!(code == INVALID_STEPS),
+        _ => assert!(false),
+    }
+    var src2 = Source::random(1, 4096)
+    let t = run_traced(M { reject_all: false }, mut src2, steps(1001, 12))
+    assert!(t.len() == 0 && t.verdict.code() == INVALID_STEPS)
+}
+
+#[test]
+fn a_huge_mean_does_not_overflow() {
+    var src = Source::random(1, 4096)
+    let t = run_traced(
+        M { reject_all: false },
+        mut src,
+        steps(1, 0xFFFFFFFFFFFFFFFF),
+    )
+    assert!(t.len() == 1)
+    var src2 = Source::random(1, 4096)
+    let v = VecOf { elem: uint_in(0, 3), max_len: 3, mean_len: 0xFFFFFFFFFFFFFFFF }
+        .generate(mut src2)
+    assert!(v.len() == 3)
+}

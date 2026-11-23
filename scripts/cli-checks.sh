@@ -45,6 +45,8 @@ expect 0 "queue replay reproduces"            $BIN replay "$TMP/q.case"
 expect 3 "queue replay against fix"           $BIN replay "$TMP/q.case" --against queue-fixed
 expect 4 "replay against wrong family"        $BIN replay "$TMP/p.case" --against queue
 expect 4 "missing file"                       $BIN replay "$TMP/missing.case"
+expect 2 "--save and --json on one path"      $BIN run permissions --seed 12345 --save "$TMP/same" --json "$TMP/same"
+expect 6 "unwritable --save is not success"   $BIN run permissions --seed 12345 --save "$TMP/no/such/dir/p.case"
 
 # Determinism: the same seed gives byte-identical output and case files.
 $BIN run permissions --seed 777 --save "$TMP/a.case" >"$TMP/a.txt"
@@ -59,7 +61,7 @@ fi
 # Damaged case files must be rejected, never replayed as a pass.
 head -n 5 "$TMP/p.case" > "$TMP/truncated.case"
 expect 4 "truncated case file"                $BIN replay "$TMP/truncated.case"
-sed 's/^fecheck-case 2/fecheck-case 9/' "$TMP/p.case" > "$TMP/schema.case"
+sed 's/^fecheck-case 3/fecheck-case 9/' "$TMP/p.case" > "$TMP/schema.case"
 expect 4 "unsupported schema version"         $BIN replay "$TMP/schema.case"
 sed 's/^choices \(.*\)/choices \1 x/' "$TMP/p.case" > "$TMP/badnum.case"
 expect 4 "non-numeric choice"                 $BIN replay "$TMP/badnum.case"
@@ -122,10 +124,17 @@ fi
 
 # The JSON trace is valid JSON (checked with python when available).
 if command -v python3 >/dev/null; then
-    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schemaVersion"]==2 and d["maxSteps"]==40 and len(d["operations"])>0' "$TMP/p.json"; then
+    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schemaVersion"]==3 and d["maxSteps"]==40 and len(d["operations"])>0' "$TMP/p.json"; then
         echo "ok   trace JSON parses"
     else
         echo "FAIL trace JSON"; fail=1
+    fi
+    # `replay --json` describes the replay run, not the recorded one.
+    $BIN replay "$TMP/p.case" --against permissions-fixed --json "$TMP/r.json" >/dev/null || true
+    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["target"]=="permissions-fixed" and d["failure"]["verdict"]=="pass"' "$TMP/r.json"; then
+        echo "ok   replay JSON describes the replay (target and verdict)"
+    else
+        echo "FAIL replay JSON mixes the recorded case with the replay"; sed 's/^/     | /' "$TMP/r.json"; fail=1
     fi
 fi
 

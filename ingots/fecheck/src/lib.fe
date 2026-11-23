@@ -11,6 +11,7 @@ pub use source::{
     same_choices,
     simpler,
     DEFAULT_MAX_CHOICES,
+    continue_odds,
 }
 pub use verdict::{Verdict, ensure, assume, verdict_from_parts, kind_name}
 pub use gen::{
@@ -42,6 +43,7 @@ pub use machine::{
     run_steps_with,
     run_traced_with,
     POSTCONDITION_MISMATCH,
+    INVALID_STEPS,
     NO_STEP,
     MAX_STEPS,
 }
@@ -54,12 +56,17 @@ pub use artifact::{
     SCHEMA_VERSION,
     MIN_SCHEMA_VERSION,
     FECHECK_VERSION,
+    INCONSISTENT_VERDICT,
+    INCONSISTENT_STEP,
+    INCONSISTENT_STEPS,
 }
 pub use replay::{
     ReplayOutcome,
     replay_property,
     replay_machine,
     replay_machine_with,
+    op_text,
+    SKIPPED_PREFIX,
     machine_case,
     case_steps,
 }

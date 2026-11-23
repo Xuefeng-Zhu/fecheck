@@ -77,6 +77,10 @@ pub enum Status {
     InvalidConfig { pub problem: u64 },
     /// Too many cases were discarded to reach the requested count.
     GaveUp,
+    /// A case failed, but rerunning its exact choices gave a different
+    /// verdict, so the test is nondeterministic. Nothing was shrunk;
+    /// `original_verdict` is the first run, `shrunk_verdict` the rerun.
+    Unstable,
 }
 
 /// The result of a `check` run.
@@ -114,13 +118,23 @@ impl Report {
     }
 
     /// The process exit status a CI job should use for this report:
-    /// 0 passed, 1 property failed, 2 invalid configuration, 3 gave up.
+    /// 0 passed, 1 property failed, 2 invalid configuration, 3 gave up,
+    /// 4 unstable (nondeterministic test).
     pub fn exit_code(self) -> i32 {
         match self.status {
             Status::Passed => 0,
             Status::Failed => 1,
             Status::InvalidConfig { problem } => 2,
             Status::GaveUp => 3,
+            Status::Unstable => 4,
+        }
+    }
+
+    /// Whether the first failure did not reproduce on its own choices.
+    pub fn unstable(self) -> bool {
+        match self.status {
+            Status::Unstable => true,
+            _ => false,
         }
     }
 }
@@ -190,6 +204,20 @@ uses F::E
         let (verdict, choices) = run_random(test, seed, config.max_choices)
         report.cases_run += 1
         if verdict.is_failure() {
+            // Confirm the failure before shrinking: the shrinker trusts that
+            // these choices fail this way, which a nondeterministic test
+            // breaks.
+            let (again, _) = run_choices(test, copy_choices(choices), config.max_choices)
+            if !again.same_failure(verdict) {
+                report.status = Status::Unstable
+                report.failing_case = index
+                report.failing_case_seed = seed
+                report.original_verdict = verdict
+                report.shrunk_verdict = again
+                report.original = copy_choices(choices)
+                report.shrunk = choices
+                return report
+            }
             let result = shrink(
                 test,
                 choices,

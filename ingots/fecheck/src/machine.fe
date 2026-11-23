@@ -22,7 +22,7 @@
 use core::{MemBuffer, MemVec}
 use core::ops::Eq
 use std::io::Display
-use super::source::Source
+use super::source::{Source, continue_odds}
 use super::verdict::Verdict
 
 /// Failure code for a command whose SUT result differs from the model's.
@@ -30,6 +30,10 @@ pub const POSTCONDITION_MISMATCH: u64 = 0xFFFF0001
 
 /// No step failed.
 pub const NO_STEP: u64 = 0xFFFFFFFFFFFFFFFF
+
+/// Error code of a run started with unusable `Steps` (`Steps::problem`).
+/// The run executes nothing and reports `Error`, never a vacuous pass.
+pub const INVALID_STEPS: u64 = 0xFFFF0002
 
 /// A system under test and the model it is checked against.
 pub trait StateMachine {
@@ -163,12 +167,16 @@ fn execute<M: StateMachine>(
     _ trace: mut Trace,
     _ record: bool,
 ) -> Verdict {
+    if steps.problem() != 0 {
+        trace.verdict = Verdict::Error { code: INVALID_STEPS }
+        return trace.verdict
+    }
     var model = machine.new_model()
     var sut = machine.new_sut()
     var index: u64 = 0
     var verdict = Verdict::Pass
     while index < steps.max {
-        if !src.draw_weighted(steps.mean, steps.mean + 1) {
+        if !src.draw_weighted(steps.mean, continue_odds(steps.mean)) {
             break
         }
         let cmd = machine.gen_cmd(mut src, model)
@@ -307,12 +315,16 @@ fn execute_with<M: EffectfulMachine>(
 ) -> Verdict
 uses (env: mut M::Env)
 {
+    if steps.problem() != 0 {
+        trace.verdict = Verdict::Error { code: INVALID_STEPS }
+        return trace.verdict
+    }
     var model = machine.new_model()
     var sut = machine.new_sut()
     var index: u64 = 0
     var verdict = Verdict::Pass
     while index < steps.max {
-        if !src.draw_weighted(steps.mean, steps.mean + 1) {
+        if !src.draw_weighted(steps.mean, continue_odds(steps.mean)) {
             break
         }
         let cmd = machine.gen_cmd(mut src, model)

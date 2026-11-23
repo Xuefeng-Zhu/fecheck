@@ -63,7 +63,7 @@ fn add_capped_never_exceeds_the_cap() {
 ```
 
 Switch `buggy: false` to `buggy: true` and the test fails. `report.shrunk`
-holds the smallest failing choices: `[0, 1256]`, so value 0 and n 1256, the
+holds the shrunk choices: `[0, 1256]`, so value 0 and n 1256, the
 first input past the cap plus 255.
 
 ## 5. Pin the failure as a regression test

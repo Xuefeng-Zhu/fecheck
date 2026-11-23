@@ -294,7 +294,9 @@ pub fn sar_i8(_ src: mut Source) -> Verdict {
     var i: i64 = 0
     while i < si && i < 9 {
         // floor division by 2
-        want = if want < 0 { (want - 1) / 2 } else { want / 2 }
+        // floor(want / 2) without `want - 1`, which overflows at i64::MIN.
+        let odd_negative = want < 0 && want % 2 != 0
+        want = if odd_negative { want / 2 - 1 } else { want / 2 }
         i += 1
     }
     ensure(got == want, SAR_I8)
@@ -482,7 +484,8 @@ pub fn div_i64_matches(_ src: mut Source) -> Verdict {
     let a = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
     let d = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
     if d == 0 || (d == -1 && a == -9223372036854775807 - 1) {
-        return ensure(true, DIV_I64)
+        // Excluded inputs are discarded, not counted as passes.
+        return Verdict::Discard
     }
     let ua: u64 = a.unsigned_abs()
     let ud: u64 = d.unsigned_abs()
@@ -559,7 +562,9 @@ pub fn sar_i64_matches(_ src: mut Source) -> Verdict {
     var want = x
     var i: i64 = 0
     while i < s && i < 65 {
-        want = if want < 0 { (want - 1) / 2 } else { want / 2 }
+        // floor(want / 2) without `want - 1`, which overflows at i64::MIN.
+        let odd_negative = want < 0 && want % 2 != 0
+        want = if odd_negative { want / 2 - 1 } else { want / 2 }
         i += 1
     }
     ensure(got == want, SAR_I64)
@@ -592,7 +597,8 @@ pub fn div_i128_matches(_ src: mut Source) -> Verdict {
     let d = word_i128(mut src)
     let min: i128 = i128::min()
     if d == 0 || (d == -1 && a == min) {
-        return ensure(true, DIV_I128)
+        // Excluded inputs are discarded, not counted as passes.
+        return Verdict::Discard
     }
     let ua: u128 = a.unsigned_abs()
     let ud: u128 = d.unsigned_abs()
