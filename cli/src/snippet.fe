@@ -10,6 +10,45 @@ fn fixed_expr(_ target: MemSpan) -> MemBuffer {
     }
 }
 
+/// Appends Fe statements that append `line` and a newline to `text`.
+/// Printable ASCII, tab and carriage return fit in a Fe string literal
+/// (`\\`, `\"`, `\t`, `\r`). Fe has no `\x` escape, so a line with any other
+/// byte is appended byte by byte instead.
+fn write_line_code(_ out: mut MemBuffer, _ line: MemSpan) {
+    var literal_ok = true
+    for b in line {
+        if b != 9 && b != 13 && (b < 32 || b >= 127) {
+            literal_ok = false
+        }
+    }
+    if !literal_ok {
+        for b in line {
+            writeln!(mut out, "      text.push(", b, ")")
+        }
+        writeln!(mut out, "      text.push(10)")
+        return
+    }
+    var literal = MemBuffer::new(0)
+    for b in line {
+        if b == b'"' {
+            literal.push(92)
+            literal.push(b'"')
+        } else if b == 92 {
+            literal.push(92)
+            literal.push(92)
+        } else if b == 9 {
+            literal.push(92)
+            literal.push(b't')
+        } else if b == 13 {
+            literal.push(92)
+            literal.push(b'r')
+        } else {
+            literal.push(b)
+        }
+    }
+    writeln!(mut out, "      writeln!(mut text, \"", literal, "\")")
+}
+
 /// Renders a compilable regression test for the bundled target. It passes
 /// against the fixed implementation and fails against the buggy one;
 /// `scripts/cli-checks.sh` compiles and runs it both ways.
@@ -39,9 +78,7 @@ pub fn regression_text(_ case: Case) -> MemBuffer {
     let text = encode(case)
     writeln!(mut out, "      var text = core::MemBuffer::new(0)")
     for line in text.span().lines() {
-        var literal = MemBuffer::new(0)
-        fecheck::write_json_string(mut literal, line)
-        writeln!(mut out, "      writeln!(mut text, ", literal, ")")
+        write_line_code(mut out, line)
     }
     writeln!(
         mut out,

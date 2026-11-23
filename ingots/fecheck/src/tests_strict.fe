@@ -428,3 +428,29 @@ fn config_respects_the_saved_choice_limit() {
     cfg.max_choices = 4097
     assert!(cfg.problem() == ingot::runner::CONFIG_TOO_MANY_CHOICES)
 }
+
+#[test]
+fn certain_continuation_stops_when_the_replay_budget_is_spent() {
+    // Random mode stops at the budget; replay must too, or a certain
+    // "more" flag keeps a vector growing to max_len.
+    let g = VecOf { elem: uint_in(5, 5), max_len: 32, mean_len: 0xffffffffffffffff }
+    var random = Source::random(1, 1)
+    let a = g.generate(mut random)
+    var replay = Source::replay(ingot::choices_from([1]), 1)
+    let b = g.generate(mut replay)
+    assert!(a.len() == 1 && b.len() == 1)
+    assert!(random.overran() && replay.overran())
+}
+
+#[test]
+fn a_config_problem_cannot_be_cleared() {
+    let report = check(
+        |src: mut Source| {
+            let _ = ingot::one_of(0).generate(mut src)
+            src.reject_config(0)
+            Verdict::Pass
+        },
+        Config::new(seed: 1, cases: 1),
+    )
+    assert!(!report.passed())
+}

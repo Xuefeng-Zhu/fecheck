@@ -34,13 +34,15 @@ come from Fe itself:
   tests) on Sonatina and native alike. Replay reads the recorded choices, not
   a seed. A case the native CLI writes replays unchanged against a deployed
   contract in the `fe test` EVM (next section).
-* **No I/O in the engine, by construction.** `Source`, the generators, the
-  shrinker and the case parser declare no effects, and Fe has no ambient
+* **No I/O in the engine, by construction.** `Source`, the generators and
+  the case parser declare no effects, and the runner and shrinker declare
+  only the test's own (`uses F::E`). Fe has no ambient
   I/O, so the compiler rejects a generator that tries to read a file or a
   clock. That narrows where nondeterminism can come from, but doesn't remove
   it: a test that holds an effect (`mut Evm`, `Fs`) can still behave
   differently from run to run. `check` reruns every failure on its own
-  choices before shrinking and checks the final normalized choices again. A change in failure kind, code or choice consumption yields `Unstable`.
+  choices before shrinking and checks the final normalized choices again. A
+  change in failure kind, code or choice consumption yields `Unstable`.
 
 ## Find natively, confirm on the `fe test` EVM
 
@@ -140,7 +142,8 @@ other directly.
 | `fe test --backend native examples/differential_deep` | native x86-64 (CI) | 11,000,000 | agreed with reference |
 
 No Fe bug turned up. The suite stays in CI as a regression net for the
-compiler and the core library, and it is a template for running the same arithmetic checks on both backends.
+compiler and the core library, and it is a template for running the same
+arithmetic checks on both backends.
 
 ## An ERC-20 we didn't write
 
@@ -171,7 +174,8 @@ against the layout in the Solidity ABI specification, computed independently
 in the test, across uint8 to uint256, int8 to int256 including MIN and MAX, the
 custom widths (uint24, int72, int248 and others), bool, address, `bytes`,
 `string`, `uint256[]`, static arrays and return values. 18,000 cases pass on
-both backends, so no bug was found. A development experiment changed two references and observed five failing properties ([docs/abi.md](docs/abi.md)).
+both backends, so no bug was found. A development experiment changed two
+references and observed five failing properties ([docs/abi.md](docs/abi.md)).
 
 ## The same idea from the CLI
 
@@ -240,7 +244,10 @@ those tools.
 | A stand-alone ingot using FeCheck as a dependency, tested from outside the repo | done (`examples/external`, `scripts/external-check.sh`) |
 | Web visualisation | not built (deliberately; see limitations) |
 
-The [test results](docs/testing.md) identify the revision and backend for each run. The [reviewed submission CI job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209) ran on `4bb3eb4`.
+The [test results](docs/testing.md) identify the revision and backend for each
+run. The [reviewed submission CI
+job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209)
+ran on `4bb3eb4`.
 
 ## Quick start
 
@@ -286,7 +293,8 @@ fe test examples/contract                   # Demo C: contract under test
 | 7 | too many discarded cases (`GaveUp`) | |
 | 8 | failure did not replay exactly (`Unstable`) | |
 
-The library's `Report::exit_code` uses 3 for `GaveUp` and 4 for `Unstable`. The CLI uses 7 and 8 for these outcomes and writes no case.
+The library's `Report::exit_code` uses 3 for `GaveUp` and 4 for `Unstable`.
+The CLI uses 7 and 8 for these outcomes and writes no case.
 
 Only 3 means "fixed". `fecheck demo` and `scripts/cli-checks.sh` treat any
 other replay result as a failure.
@@ -422,21 +430,68 @@ fn cached_registry_breaks_the_model() uses (evm: mut Evm) {
 }
 ```
 
-The closure and `RegistryMachine` share a choice encoding. Their comparison test supplies a literal choice array, and they use different failure codes. The file-based contract regression uses `OnChainPermissions`, which shares Demo A’s generator, model and failure codes.
+The closure and `RegistryMachine` share a choice encoding. Their comparison
+test supplies a literal choice array, and they use different failure codes.
+The file-based contract regression uses `OnChainPermissions`, which shares
+Demo A's generator, model and failure codes.
 
 ### Turning a failure into a regression test
 
-For either bundled target, `fecheck run` prints a Fe test with the saved case embedded. The test decodes it, calls `replay_machine` with the fixed implementation and asserts `ReplayOutcome::NoLongerFails`. Copy the printed test into an ingot that depends on FeCheck and the target. The same assertion works for a custom machine with its own decoded case.
+For either bundled target, `fecheck run` prints a Fe test with the saved case
+embedded. The test decodes it, calls `replay_machine` with the fixed
+implementation and asserts `ReplayOutcome::NoLongerFails`. Copy the printed
+test into an ingot that depends on FeCheck and the target. The same assertion
+works for a custom machine with its own decoded case.
+
+For `fecheck run permissions --seed 12345` it prints (case lines shortened):
+
+```fe
+#[test]
+fn regression_revoked_agent_cannot_execute_seed_12345() {
+    var text = core::MemBuffer::new(0)
+    writeln!(mut text, "fecheck-case 4")
+    // ... the rest of the .case file, one writeln! per line ...
+    writeln!(mut text, "op run \"Execute(agent=2)\"")
+    writeln!(mut text, "end")
+    let case = match fecheck::decode(text.span()) { Result::Ok(c) => c, Result::Err(_) => panic() }
+    let (outcome, _) = fecheck::replay_machine(permissions::against_fixed(), fecheck::case_steps(case), case)
+    assert!(match outcome { fecheck::ReplayOutcome::NoLongerFails => true, _ => false })
+}
+```
+
+The test passes only if the fixed machine runs every recorded operation,
+with the same text, run/skip status and choice consumption, and none fails.
+`scripts/cli-checks.sh` compiles the printed test and checks that it passes
+on the fixed implementation and fails on the buggy one.
 
 ### Replay guarantees
 
-Schema 4 records the choices, rendered command text, a separate run/skip field per operation, failure kind and code, failed step and generation settings. A machine recording must contain choices and finish at an executed failing operation. The parser rejects contradictory fields and non-comment content after `end`. Trailing blank and comment lines are allowed.
+Schema 4 records the choices, rendered command text, a separate run/skip field
+per operation, failure kind and code, failed step and generation settings. A
+machine recording must contain choices and finish at an executed failing
+operation. The parser rejects contradictory fields and non-comment content
+after `end`. Trailing blank and comment lines are allowed.
 
-Both `Reproduced` and `NoLongerFails` require the complete recorded command sequence and exact operand consumption. Machine replay may stop at EOF between commands after the final operation. Missing operands, clamped choices, extra choices and changed command text produce drift. An earlier failure on a matching prefix is `DifferentFailure`, and a discarded run on a matching prefix is `Invalid`. Passing properties and properties reproducing the recorded failure must consume exactly their choices too.
+Both `Reproduced` and `NoLongerFails` require the complete recorded command
+sequence and exact operand consumption. Machine replay may stop at EOF between
+commands after the final operation. Missing operands, clamped choices, extra
+choices and changed command text produce drift. An earlier failure on a
+matching prefix is `DifferentFailure`, and a discarded run on a matching
+prefix is `Invalid`. Passing properties and properties reproducing the
+recorded failure must consume exactly their choices too.
 
-With schema 4, a changed precondition result produces drift even if the command displays identically. The comparison uses `Display` text and skip status. The file does not store expected or actual observations, and two distinct commands can have the same display. Schemas 1 and 2 have only command text, so earlier skip status is unknown. Replay still requires the failed operation to execute. Schema 3 used an ambiguous `(skipped) ` prefix. The parser rejects it on the failed operation and replay treats it as drift elsewhere.
+With schema 4, a changed precondition result produces drift even if the
+command displays identically. The comparison uses `Display` text and skip
+status. The file does not store expected or actual observations, and two
+distinct commands can have the same display. Schemas 1 and 2 have only command
+text, so earlier skip status is unknown. Replay still requires the failed
+operation to execute. Schema 3 used an ambiguous `(skipped) ` prefix. The
+parser rejects it on the failed operation and replay treats it as drift
+elsewhere.
 
-Re-encoding retains the recorded schema. Schema 1 omits settings. The CLI uses the historical defaults of 40 operations and mean 12, while library callers can supply a fallback.
+Re-encoding retains the recorded schema. Schema 1 omits settings. The CLI uses
+the historical defaults of 40 operations and mean 12, while library callers
+can supply a fallback.
 
 ## Repository layout
 
@@ -453,7 +508,7 @@ ingots/fecheck/src/         the library (all Fe)
   artifact.fe                 .case format: encoder and strict parser
   replay.fe                   replay and outcome classification
   json.fe                     JSON trace export
-  tests_*.fe                  59 tests
+  tests_*.fe                  87 tests
 examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)

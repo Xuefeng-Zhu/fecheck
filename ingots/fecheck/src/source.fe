@@ -121,7 +121,12 @@ impl Source {
         }
         if self.replaying {
             let flag = self.draw(1)
-            if numerator >= denominator && flag == 0 && !self.overran() {
+            if self.overran() {
+                // Out of budget: stop, as random mode does, instead of
+                // treating a certain event as still true.
+                return false
+            }
+            if numerator >= denominator && flag == 0 {
                 // Keep the original one-flag encoding, even for a certain event.
                 let last = self.recorded.len() - 1
                 self.recorded[last] = 1
@@ -150,8 +155,12 @@ impl Source {
         self.overrun
     }
 
+    /// Records a configuration problem. The first nonzero problem sticks;
+    /// later calls, including with 0, cannot clear it.
     pub fn reject_config(mut self, _ problem: u64) {
-        self.config_problem = problem
+        if self.config_problem == 0 {
+            self.config_problem = problem
+        }
     }
 
     pub fn problem(self) -> u64 {
