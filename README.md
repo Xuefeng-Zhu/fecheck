@@ -60,8 +60,8 @@ confirm on chain:
 [scripts/native-to-evm.sh](scripts/native-to-evm.sh) runs all of this in CI
 and fails if the native CLI's case differs by a byte from the checked-in
 file or the embedded text. It also runs 1,000,000 cases against the fixed
-logic natively and prints the wall-clock time
-([docs/evidence/ci-run-native-to-evm.txt](docs/evidence/ci-run-native-to-evm.txt)).
+logic natively: 507 ms wall clock on GitHub's x86-64 runner, process start
+included ([docs/evidence/ci-run-native-to-evm.txt](docs/evidence/ci-run-native-to-evm.txt)).
 
 ## The headline: a bug in a deployed EVM contract, found and minimized
 

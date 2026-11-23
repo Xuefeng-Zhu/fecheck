@@ -1,0 +1,17 @@
+# GitHub Actions CI run 45126269244, commit c8acf71 (ubuntu-latest, x86-64), conclusion: success
+# https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45126269244
+# Step "Find natively, confirm on chain" (./scripts/native-to-evm.sh), timestamps stripped
+
+== 1. native search (fecheck run permissions --seed 12345)
+Property failed on case 45 of 1000.
+Shrunk:   4 operations (12 choices) after 217 candidates, 2 accepted
+== 2. the native case is the checked-in case, and the embedded one
+identical: examples/contract/cases/permissions-native.case and native_case_text() in examples/contract/src/native_case.fe
+== 3. replay on the EVM against deployed contracts
+PASS  [0.0009s] native_case_reproduces_on_the_deployed_contract
+PASS  [0.0014s] native_case_passes_on_the_fixed_contract
+
+test result: ok. 2 passed; 0 failed
+== 4. native scale: 1,000,000 cases against the fixed logic
+Property passed: 1000000 cases, 0 discarded.
+native: 1,000,000 cases in 507 ms (wall clock, including process start)
