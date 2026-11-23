@@ -1,5 +1,7 @@
 # Testing
 
+The schema-4 implementation at `3cf5c78` passed all **179 EVM suite tests** on Fe 26.6.0 with `SKIP_NATIVE=1`, including the external consumer. Fe 26.7.0 passed all 85 core and 17 contract tests. Demo C found case 78 and shrank 24 choices to 12 in 225 candidates. The fourth call failed on `CachedRegistry` and passed on `FixedRegistry`. Both emitted CLI regressions passed on their fixed targets and failed on their buggy targets. The permissions regression also failed when the precondition skipped every command. These runs used aarch64 Linux. Native CLI results below belong to the earlier submission.
+
 The reviewed submission at `4bb3eb4` passed 152 EVM suite tests and 44 native CLI checks. Its x86-64 job also checked byte-identical case generation and both deployed contract replays. [Submission CI job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209)
 
 The checked-in [EVM test log](evidence/test-run.txt), [CLI log](evidence/cli-checks.txt) and [Demo C log](evidence/contract-demo.txt) are historical runs. The [native timing log](evidence/ci-run-native-to-evm.txt) records 507 ms at `c8acf71`. The submission job measured 495 ms for the same one-million-case workload.
