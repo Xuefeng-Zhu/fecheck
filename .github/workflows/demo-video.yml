@@ -1,0 +1,36 @@
+name: Demo video
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [demo-video]
+
+permissions:
+  contents: read
+
+env:
+  FE_VERSION: v26.6.0
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Fe
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/argotorg/fe/master/feup/feup.sh | bash -s -- --version "$FE_VERSION" --no-modify-path
+          echo "$HOME/.fe/bin" >> "$GITHUB_PATH"
+      - run: fe --version
+      - name: Install ffmpeg, Pillow, fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg python3-pil fonts-dejavu-core
+      - name: Build CLI
+        run: ./scripts/build.sh
+      - name: Record demo
+        run: ./scripts/record-demo.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fecheck-demo-video
+          path: |
+            out/rec/
+            docs/media/fecheck-demo.mp4
