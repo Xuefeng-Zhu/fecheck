@@ -650,17 +650,29 @@ fn byte_value(_ b: u256, signed: bool) -> i64 {
     }
 }
 
+fn checked_byte_matches(_ word: u256, _ result: Option<u8>) -> bool {
+    match result {
+        Option::Some(byte) => (byte as u256) == word,
+        Option::None => word > 255,
+    }
+}
+
+#[test]
+fn checked_byte_oracle_detects_wrong_results_at_the_boundary() {
+    assert!(checked_byte_matches(255, Option::Some(255)))
+    assert!(!checked_byte_matches(255, Option::Some(254)))
+    assert!(!checked_byte_matches(255, Option::None))
+    assert!(checked_byte_matches(256, Option::None))
+    assert!(!checked_byte_matches(256, Option::Some(0)))
+}
+
 /// u256 -> u8 and u256 -> i8: downcast, downcast_saturate and
 /// downcast_truncate against range checks on the word.
 pub fn downcast_u256_matches(_ src: mut Source) -> Verdict {
     let w = word(mut src)
     // to u8
     let a: Option<u8> = w.downcast()
-    let a_ok = if w <= 255 {
-        a == Option::Some(to_u8(to_u64(w)))
-    } else {
-        a.is_none()
-    }
+    let a_ok = checked_byte_matches(w, a)
     let sa: u8 = w.downcast_saturate()
     let sa_ok = (sa as u256) == (if w > 255 { 255 } else { w })
     let ta: u8 = w.downcast_truncate()
