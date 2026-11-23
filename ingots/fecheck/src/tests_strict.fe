@@ -359,3 +359,70 @@ fn same_code_with_extra_read_is_unstable_without_shrinking() {
     )
     assert!(r.unstable() && r.shrunk_verdict.code() == 7)
 }
+
+#[test]
+fn invalid_steps_rejected_before_reporting_a_failure() {
+    let r = check(
+        |src: mut Source| run_steps(M { reject_all: false }, mut src, steps(0, 12)),
+        Config::new(seed: 1, cases: 1),
+    )
+    match r.status {
+        ingot::Status::InvalidConfig { problem } => assert!(problem == INVALID_STEPS),
+        _ => assert!(false),
+    }
+}
+
+#[test]
+fn over_budget_machine_discards() {
+    var src = Source::replay(ingot::choices_from([1, 1, 60]), 2)
+    let t = run_traced(M { reject_all: false }, mut src, steps(3, 2))
+    assert!(t.verdict.is_discard() && t.executed == 0)
+    var again = Source::replay(ingot::choices_from([1, 1, 60]), 2)
+    assert!(
+        run_steps(M { reject_all: false }, mut again, steps(3, 2)).is_discard(),
+    )
+}
+
+#[test]
+fn maximum_mean_vector_cannot_shrink_to_empty() {
+    var src = Source::replay(ingot::choices_from([0]), 32)
+    let v = VecOf { elem: uint_in(5, 5), max_len: 3, mean_len: 0xffffffffffffffff }
+        .generate(mut src)
+    assert!(v.len() == 3)
+}
+
+#[test]
+fn empty_domains_invalidate_the_case() {
+    let cfg = Config::new(seed: 1, cases: 1)
+    let a = check(
+        |src: mut Source| {
+            let _ = ingot::one_of(0).generate(mut src)
+            Verdict::Pass
+        },
+        cfg,
+    )
+    let b = check(
+        |src: mut Source| {
+            let _ = uint_in(9, 3).generate(mut src)
+            Verdict::Pass
+        },
+        cfg,
+    )
+    let c = check(
+        |src: mut Source| {
+            let _ = ingot::int_in(9, 3).generate(mut src)
+            Verdict::Pass
+        },
+        cfg,
+    )
+    assert!(
+        a.exit_code() == 2 && b.exit_code() == 2 && c.exit_code() == 2,
+    )
+}
+
+#[test]
+fn config_respects_the_saved_choice_limit() {
+    var cfg = Config::new(seed: 1, cases: 1)
+    cfg.max_choices = 4097
+    assert!(cfg.problem() == ingot::runner::CONFIG_TOO_MANY_CHOICES)
+}

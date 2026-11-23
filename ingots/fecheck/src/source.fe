@@ -45,6 +45,7 @@ pub struct Source {
     recorded: MemVec<u64>,
     max_choices: usize,
     overrun: bool,
+    config_problem: u64,
     /// Replayed choices that exceeded their draw's bound and were clamped.
     clamped: u64,
     /// Draws made after the recorded choices ran out (each returned 0).
@@ -62,6 +63,7 @@ impl Source {
             recorded: MemVec::new(),
             max_choices,
             overrun: false,
+            config_problem: 0,
             clamped: 0,
             past_end: 0,
         }
@@ -77,6 +79,7 @@ impl Source {
             recorded: MemVec::new(),
             max_choices,
             overrun: false,
+            config_problem: 0,
             clamped: 0,
             past_end: 0,
         }
@@ -117,7 +120,14 @@ impl Source {
             return false
         }
         if self.replaying {
-            return self.draw(1) == 1
+            let flag = self.draw(1)
+            if numerator >= denominator && flag == 0 && !self.overran() {
+                // Keep the original one-flag encoding, even for a certain event.
+                let last = self.recorded.len() - 1
+                self.recorded[last] = 1
+                self.clamped += 1
+            }
+            return numerator >= denominator || flag == 1
         }
         if self.recorded.len() >= self.max_choices {
             self.overrun = true
@@ -138,6 +148,14 @@ impl Source {
     /// Whether the case drew more choices than its budget allows.
     pub fn overran(self) -> bool {
         self.overrun
+    }
+
+    pub fn reject_config(mut self, _ problem: u64) {
+        self.config_problem = problem
+    }
+
+    pub fn problem(self) -> u64 {
+        self.config_problem
     }
 
     /// How many choices have been drawn so far.
@@ -162,7 +180,11 @@ impl Source {
     }
 
     pub fn exact(self) -> bool {
-        !self.overran() && self.clamped() == 0 && self.past_end() == 0 && self.unread() == 0
+        self.problem() == 0
+            && !self.overran()
+            && self.clamped() == 0
+            && self.past_end() == 0
+            && self.unread() == 0
     }
 
     /// Whether this source is replaying recorded choices.

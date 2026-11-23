@@ -482,9 +482,10 @@ fn draw_weighted_certain_is_always_true() {
     // Each draw records one choice, 1, so replay and shrinking still work.
     assert!(src.len() == 200)
     assert!(src.choices()[0] == 1)
-    // A replayed 0 still reads as false, so the shrinker can cut there.
+    // A replayed 0 normalizes to the only possible generated flag.
     var replayed = Source::replay(choices_from([0]), 4096)
-    assert!(!replayed.draw_weighted(1, 1))
+    assert!(replayed.draw_weighted(1, 1))
+    assert!(replayed.clamped() == 1 && replayed.choices()[0] == 1)
     // Never-true weights stay false and record nothing.
     var never = Source::random(7, 4096)
     assert!(!never.draw_weighted(0, 5) && !never.draw_weighted(5, 0))

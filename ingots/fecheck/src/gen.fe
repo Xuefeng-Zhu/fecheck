@@ -5,6 +5,7 @@
 // simpler values*; it never needs a shrinker of its own.
 
 use core::MemVec
+use super::runner::CONFIG_EMPTY_DOMAIN
 use super::source::{Source, continue_odds}
 
 /// A generator of `Out` values.
@@ -19,6 +20,9 @@ pub struct UintRange { pub lo: u64, pub hi: u64 }
 impl Gen for UintRange {
     type Out = u64
     fn generate(self, _ src: mut Source) -> u64 {
+        if self.hi < self.lo {
+            src.reject_config(CONFIG_EMPTY_DOMAIN)
+        }
         if self.hi <= self.lo {
             return self.lo
         }
@@ -42,6 +46,9 @@ pub struct IntRange { pub lo: i64, pub hi: i64 }
 impl Gen for IntRange {
     type Out = i64
     fn generate(self, _ src: mut Source) -> i64 {
+        if self.hi < self.lo {
+            src.reject_config(CONFIG_EMPTY_DOMAIN)
+        }
         if self.hi <= self.lo {
             return self.lo
         }
@@ -101,6 +108,9 @@ pub struct OneOf { pub n: u64 }
 impl Gen for OneOf {
     type Out = u64
     fn generate(self, _ src: mut Source) -> u64 {
+        if self.n == 0 {
+            src.reject_config(CONFIG_EMPTY_DOMAIN)
+        }
         if self.n <= 1 { return 0 }
         src.draw(self.n - 1)
     }

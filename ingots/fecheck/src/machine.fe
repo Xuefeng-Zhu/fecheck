@@ -168,6 +168,7 @@ fn execute<M: StateMachine>(
     _ record: bool,
 ) -> Verdict {
     if steps.problem() != 0 {
+        src.reject_config(INVALID_STEPS)
         trace.verdict = Verdict::Error { code: INVALID_STEPS }
         return trace.verdict
     }
@@ -180,6 +181,9 @@ fn execute<M: StateMachine>(
             break
         }
         let cmd = machine.gen_cmd(mut src, model)
+        if src.overran() || src.problem() != 0 {
+            break
+        }
         if !machine.precondition(model, cmd) {
             trace.skipped += 1
             if record {
@@ -231,6 +235,12 @@ fn execute<M: StateMachine>(
             break
         }
         index += 1
+    }
+    if src.overran() {
+        verdict = Verdict::Discard
+    }
+    if src.problem() != 0 {
+        verdict = Verdict::Error { code: src.problem() }
     }
     trace.verdict = verdict
     verdict
@@ -316,6 +326,7 @@ fn execute_with<M: EffectfulMachine>(
 uses (env: mut M::Env)
 {
     if steps.problem() != 0 {
+        src.reject_config(INVALID_STEPS)
         trace.verdict = Verdict::Error { code: INVALID_STEPS }
         return trace.verdict
     }
@@ -328,6 +339,9 @@ uses (env: mut M::Env)
             break
         }
         let cmd = machine.gen_cmd(mut src, model)
+        if src.overran() || src.problem() != 0 {
+            break
+        }
         if !machine.precondition(model, cmd) {
             trace.skipped += 1
             if record {
@@ -377,6 +391,12 @@ uses (env: mut M::Env)
             break
         }
         index += 1
+    }
+    if src.overran() {
+        verdict = Verdict::Discard
+    }
+    if src.problem() != 0 {
+        verdict = Verdict::Error { code: src.problem() }
     }
     trace.verdict = verdict
     verdict

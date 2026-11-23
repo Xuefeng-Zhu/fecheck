@@ -55,6 +55,9 @@ impl Config {
         if self.max_choices == 0 {
             return CONFIG_NO_CHOICES
         }
+        if self.max_choices > DEFAULT_MAX_CHOICES {
+            return CONFIG_TOO_MANY_CHOICES
+        }
         if self.cases > MAX_CASES {
             return CONFIG_TOO_MANY_CASES
         }
@@ -63,6 +66,8 @@ impl Config {
 }
 
 pub const MAX_CASES: u64 = 100000000
+pub const CONFIG_EMPTY_DOMAIN: u64 = 4
+pub const CONFIG_TOO_MANY_CHOICES: u64 = 5
 pub const CONFIG_NO_CASES: u64 = 1
 pub const CONFIG_NO_CHOICES: u64 = 2
 pub const CONFIG_TOO_MANY_CASES: u64 = 3
@@ -146,10 +151,24 @@ pub fn run_random<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_ch
 )
 uses F::E
 {
+    let (v, choices, _) = generate(test, seed, max_choices)
+    (v, choices)
+}
+
+fn generate<F: Fn(mut Source) -> Verdict>(_ test: F, _ seed: u64, _ max_choices: usize) -> (
+    Verdict,
+    MemVec<u64>,
+    u64,
+)
+uses F::E
+{
     var src = Source::random(seed, max_choices)
     let v = test(mut src)
-    let verdict = if src.overran() { Verdict::Discard } else { v }
-    (verdict, src.into_choices())
+    let problem = src.problem()
+    let verdict = if problem != 0 {
+        Verdict::Error { code: problem }
+    } else if src.overran() { Verdict::Discard } else { v }
+    (verdict, src.into_choices(), problem)
 }
 
 /// Runs `test` once on recorded `choices`.
@@ -164,7 +183,9 @@ uses F::E
 {
     var src = Source::replay(copy_choices(choices), max_choices)
     let v = test(mut src)
-    let verdict = if src.overran() { Verdict::Discard } else { v }
+    let verdict = if src.problem() != 0 {
+        Verdict::Error { code: src.problem() }
+    } else if src.overran() { Verdict::Discard } else { v }
     (verdict, src.into_choices())
 }
 
@@ -212,8 +233,12 @@ uses F::E
             return report
         }
         let seed = case_seed(config.seed, index)
-        let (verdict, choices) = run_random(test, seed, config.max_choices)
+        let (verdict, choices, problem) = generate(test, seed, config.max_choices)
         report.cases_run += 1
+        if problem != 0 {
+            report.status = Status::InvalidConfig { problem }
+            return report
+        }
         if verdict.is_failure() {
             // Confirm the failure before shrinking: the shrinker trusts that
             // these choices fail this way, which a nondeterministic test
