@@ -16,3 +16,5 @@ $ fe test examples/recipes
 test result: ok. 10 passed; 0 failed
 $ fe test examples/abi
 test result: ok. 9 passed; 0 failed
+$ ./scripts/external-check.sh   (examples/external copied outside the repo)
+test result: ok. 5 passed; 0 failed

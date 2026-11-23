@@ -235,7 +235,7 @@ those tools.
 | Versioned `.case` regression files (schema 4 records generation settings and a separate execution flag for each operation; reads schemas 1–4), strict parser that also rejects contradictory files | done |
 | Replay that verifies the whole recorded trace, with outcomes `Reproduced` / `NoLongerFails` / `DifferentFailure` / `Invalid` / `Drift` | done |
 | JSON trace export | done (write-only) |
-| Native CLI: `list`, `run`, `replay`, `demo`, distinct exit codes per outcome | done (x86-64 Linux, AArch64 macOS) |
+| Native CLI: `list`, `run`, `replay`, `demo`, documented exit codes (3 = fixed) | done (x86-64 Linux, AArch64 macOS) |
 | Demo A: agent permissions with a stale-cache bug | done |
 | Demo B: bounded ring-buffer queue with a wrap-around bug | done |
 | Demo C: the permission bug in a deployed **EVM contract**, end to end with `scripts/contract-demo.sh` | done |
@@ -244,10 +244,10 @@ those tools.
 | A stand-alone ingot using FeCheck as a dependency, tested from outside the repo | done (`examples/external`, `scripts/external-check.sh`) |
 | Web visualisation | not built (deliberately; see limitations) |
 
-The [test results](docs/testing.md) identify the revision and backend for each
-run. The [reviewed submission CI
-job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209)
-ran on `4bb3eb4`.
+The [test results](docs/testing.md) identify the revision and backend for
+each run. [CI run 45141895706](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45141895706)
+passed every EVM and native suite and all 54 CLI checks on the final code
+commit, `bae50dc`.
 
 ## Quick start
 
@@ -263,6 +263,7 @@ export PATH="$HOME/.fe/bin:$PATH"
 git clone https://github.com/Xuefeng-Zhu/fecheck.git && cd fecheck
 ./scripts/contract-demo.sh   # Demo C: EVM contract bug, minimized, replayed on both contracts
 ./scripts/test.sh            # every suite, the external ingot, the CLI build and the CLI checks
+SKIP_NATIVE=1 ./scripts/test.sh  # EVM suites only (Linux AArch64, where native can't run)
 ./out/fecheck demo           # find -> shrink -> save -> replay -> fixed, twice
 ```
 

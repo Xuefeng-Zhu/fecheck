@@ -50,13 +50,15 @@ fn regression_add_capped_wraps() {
         choices_from([0, 1256]),
         4096,
     )
-    assert!(buggy.0.is_failure())
+    // Both saved choices must be read, or the pin could pass on a drifted
+    // generator that ignores the saved operand.
+    assert!(buggy.0.is_failure() && buggy.1.len() == 2)
     let fixed = run_choices(
         |src: mut Source| capped_property(mut src, buggy: false),
         choices_from([0, 1256]),
         4096,
     )
-    assert!(fixed.0.is_pass())
+    assert!(fixed.0.is_pass() && fixed.1.len() == 2)
 }
 
 // A state machine: FeCheck generates sequences of Add / Read / Reset, runs

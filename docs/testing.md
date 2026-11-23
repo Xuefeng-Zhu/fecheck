@@ -1,10 +1,8 @@
 # Testing
 
-The current branch passed all **181 EVM suite tests** on Fe 26.6.0 with `SKIP_NATIVE=1`, including the external consumer, and every EVM suite except the external copy on Fe 26.7.0 ([log](evidence/fe-26.7.0.txt)). Demo C found case 78 and shrank 24 choices to 12 in 225 candidates. The fourth call failed on `CachedRegistry` and passed on `FixedRegistry`. These runs used aarch64 Linux; native results come from CI on the pushed commit. Native CLI results below belong to the earlier submission.
+The final code commit `bae50dc` passed [CI run 45141895706](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45141895706/job/137581666909) on x86-64 Linux with Fe 26.6.0: every EVM suite, every native suite, all 54 native CLI checks, Demo C and the native-to-EVM replay. Locally on aarch64 Linux, all 181 EVM suite tests passed on both Fe 26.6.0 and Fe 26.7.0 ([26.7 log](evidence/fe-26.7.0.txt)).
 
-The reviewed submission at `4bb3eb4` passed 152 EVM suite tests and 44 native CLI checks. Its x86-64 job also checked byte-identical case generation and both deployed contract replays. [Submission CI job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209)
-
-The checked-in [EVM test log](evidence/test-run.txt), [CLI log](evidence/cli-checks.txt) and [Demo C log](evidence/contract-demo.txt) are historical runs. The [native timing log](evidence/ci-run-native-to-evm.txt) records 507 ms at `c8acf71`. The submission job measured 495 ms for the same one-million-case workload.
+The checked-in [EVM test log](evidence/test-run.txt), [CLI log](evidence/cli-checks.txt) and [Demo C log](evidence/contract-demo.txt) are historical runs. The [native timing log](evidence/ci-run-native-to-evm.txt) records 507 ms at `c8acf71`; CI on `bae50dc` measured 525 ms for the same one-million-case workload.
 
 ## How to run
 
@@ -22,25 +20,26 @@ fe test examples/recipes          # eight property patterns (docs/recipes.md)
 for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/abi examples/external cli; do fe fmt --check "$d"; done
 ```
 
-## Reviewed submission results (`4bb3eb4`)
+## Results at `bae50dc`
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|
-| `ingots/fecheck` (core) | 59 passed, 0 failed | 59 passed, 0 failed (CI) |
+| `ingots/fecheck` (core) | 87 passed, 0 failed | 87 passed, 0 failed (CI) |
 | `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
 | `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
 | `examples/contract` (Demo C: closure, `EffectfulMachine`, hand-written comparison, native case replayed on the `fe test` EVM) | 17 passed | n/a (EVM contract) |
 | `examples/erc20` (Demo E, `EffectfulMachine` and closure: 1,000 sequences each + mutant checks) | 13 passed | n/a (EVM contract) |
-| `examples/differential` (Demo D, 110,000 cases) | 29 passed | 29 passed (CI) |
+| `examples/differential` (Demo D, 29 properties + 1 oracle test, 110,000 cases) | 30 passed | 30 passed (CI) |
 | `examples/differential_deep` (Demo D, 11,000,000 cases) | n/a (exceeds the EVM test gas cap) | 29 passed (CI) |
 | `examples/abi` (Demo F, Solidity ABI vs the spec, 18,000 cases) | 9 passed | 9 passed (CI) |
 | `examples/recipes` (eight property patterns) | 10 passed | 10 passed (CI) |
-| `examples/external` (copied outside the repo) | 5 passed (CI) | |
+| `examples/external` (copied outside the repo) | 5 passed | |
+| `cli` (unit) | | 1 passed (CI) |
 | `scripts/contract-demo.sh` | shrunk case fails on Cached, passes on Fixed | |
-| `scripts/cli-checks.sh` (native CLI, built from the clone) | | 44 checks passed |
+| `scripts/cli-checks.sh` (native CLI, built from the clone) | | 54 checks passed (CI) |
 | `fe fmt --check` (all eleven ingots) | clean | |
 
-The table describes the reviewed SHA. The current branch adds regressions for final choice confirmation, artifact integrity, classification and CLI output. Run the commands above to measure the revision in your checkout. AArch64 Linux supports the EVM suites. Native CLI integration runs on supported hosts.
+AArch64 Linux runs the EVM suites (`SKIP_NATIVE=1`). Native suites and the CLI run on x86-64 Linux and AArch64 macOS.
 
 ## What the core tests cover (`ingots/fecheck/src/tests_*.fe`)
 

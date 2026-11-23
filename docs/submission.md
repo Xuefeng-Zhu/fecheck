@@ -35,6 +35,7 @@ so no generator, shrinker or parser can read a file or a clock; the native CLI s
 
 ```sh
 ./scripts/contract-demo.sh   # Demo C: minimized EVM transaction sequence, both contracts
+./scripts/build.sh           # builds out/fecheck (x86-64 Linux or AArch64 macOS)
 ./scripts/native-to-evm.sh   # native CLI finds the case; fe test EVM replays it on deployed contracts
 fe test examples/differential                   # Demo D on the EVM
 fe test --backend native examples/differential  # Demo D native
@@ -50,7 +51,7 @@ fe test examples/abi         # Demo F: Fe's Solidity ABI encoder/decoder vs the 
 * License: Apache-2.0
 * Compiler: `fe 26.6.0 (5b3f96a)`
 * Commit SHA: the full SHA given in the submission form
-* CI: https://github.com/Xuefeng-Zhu/fecheck/actions (EVM and native suites, Demo C, CLI checks)
+* CI: https://github.com/Xuefeng-Zhu/fecheck/actions (EVM and native suites, Demo C, CLI checks); run 45141895706 is the final code commit `bae50dc`
 * Project manifest: `fe.toml` (workspace) and each ingot's `fe.toml`
 
 ## Pre-existing work and reuse

@@ -69,16 +69,21 @@ first input past the cap plus 255.
 ## 5. Pin the failure as a regression test
 
 Replay those choices with `run_choices`. The result fails on the buggy
-version and passes on the fixed one, so the bug cannot come back unnoticed:
+version and passes on the fixed one:
 
 ```fe
 #[test]
 fn regression_add_capped_wraps() {
     let fixed = run_choices(|src: mut Source| capped_property(mut src, buggy: false),
                             choices_from([0, 1256]), 4096)
-    assert!(fixed.0.is_pass())
+    assert!(fixed.0.is_pass() && fixed.1.len() == 2)
 }
 ```
+
+`run_choices` also returns the choices the test actually read. Checking
+that both were read keeps the pin honest: if the generator later stops
+reading the saved operand, the regression goes red instead of passing on
+something else.
 
 ## 6. Test something stateful
 
