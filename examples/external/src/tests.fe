@@ -1,6 +1,7 @@
 // FeCheck from a separate ingot. Everything below is public API.
 use fecheck::{Source, Config, Gen, Verdict, check, ensure, uint_in, choices_from, run_choices}
-use ingot::{add_capped, add_capped_buggy}
+use fecheck::{run_steps, steps}
+use ingot::{add_capped, add_capped_buggy, MeterMachine}
 
 const CAP: u64 = 1000
 const OVER_CAP: u64 = 1
@@ -56,4 +57,24 @@ fn regression_add_capped_wraps() {
         4096,
     )
     assert!(fixed.0.is_pass())
+}
+
+// A state machine: FeCheck generates sequences of Add / Read / Reset, runs
+// them on the model and the real Meter, and shrinks any failing sequence.
+#[test]
+fn meter_matches_its_model() {
+    let report = check(
+        |src: mut Source| run_steps(MeterMachine { buggy: false }, mut src, steps(20, 6)),
+        Config::new(seed: 7, cases: 300),
+    )
+    assert!(report.passed())
+}
+
+#[test]
+fn fecheck_finds_the_buggy_meter() {
+    let report = check(
+        |src: mut Source| run_steps(MeterMachine { buggy: true }, mut src, steps(20, 6)),
+        Config::new(seed: 7, cases: 300),
+    )
+    assert!(report.failed())
 }

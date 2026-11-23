@@ -194,8 +194,11 @@ other replay result as a failure.
 
 ## Using FeCheck in your ingot
 
+New to FeCheck? [docs/first-test.md](docs/first-test.md) takes five minutes.
+
 [examples/external](examples/external) is a complete stand-alone ingot (a
-capped adder with a seeded bug, three tests). `scripts/external-check.sh`
+capped adder and a `Meter` built on it, each with a seeded bug; one property,
+one state machine, a pinned regression). `scripts/external-check.sh`
 copies it outside this repository and runs it, so the snippets below are
 tested. Fe 26.6 needs a relative dependency path:
 
@@ -361,6 +364,7 @@ docs/                       architecture, compatibility, testing, limitations, s
 
 * [docs/architecture.md](docs/architecture.md): design and comparison with Hypothesis, proptest, fast-check, Foundry and Echidna
 * [docs/fe-compatibility.md](docs/fe-compatibility.md): what was verified in Fe 26.6 and how the design adapted
+* [docs/first-test.md](docs/first-test.md): your first FeCheck test in five minutes
 * [docs/differential.md](docs/differential.md): Demo D, Fe's own arithmetic on EVM and native
 * [docs/testing.md](docs/testing.md): test inventory and recorded results
 * [docs/limitations.md](docs/limitations.md): known limitations and follow-up work

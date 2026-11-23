@@ -1,0 +1,134 @@
+// A FeCheck state machine for `Meter`: copy this file to start your own.
+//
+// The model is the specification (a plain number, clamped at the cap); the
+// SUT is the real `Meter`. FeCheck generates command sequences, runs both,
+// compares what each command returns, and shrinks any failing sequence.
+
+use core::MemBuffer
+use core::ops::Eq
+use std::io::Display
+use fecheck::{Source, Verdict, StateMachine, POSTCONDITION_MISMATCH}
+use super::Meter
+
+pub const METER_CAP: u64 = 1000
+
+/// Failure code: the meter's value went past its cap.
+pub const ABOVE_CAP: u64 = 2
+
+pub enum Cmd {
+    Add { pub n: u64 },
+    Reset,
+    Read,
+}
+
+impl Copy for Cmd {}
+
+impl Display for Cmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            Cmd::Add { n } => write!(mut out, "Add(", n, ")"),
+            Cmd::Reset => write!(mut out, "Reset"),
+            Cmd::Read => write!(mut out, "Read"),
+        }
+    }
+}
+
+/// What a command visibly returned: nothing, or the value read.
+pub struct Obs { pub value: u64 }
+
+impl Copy for Obs {}
+
+impl Eq for Obs {
+    fn eq(self, _ other: Obs) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Display for Obs {
+    fn fmt(self, _ out: mut MemBuffer) {
+        write!(mut out, self.value)
+    }
+}
+
+pub struct MeterMachine { pub buggy: bool }
+
+impl Copy for MeterMachine {}
+
+/// The model's state: the value the meter should hold.
+pub struct Model { pub value: u64 }
+
+impl StateMachine for MeterMachine {
+    type Cmd = Cmd
+    type Obs = Obs
+    type Model = Model
+    type Sut = Meter
+
+    fn new_model(self) -> Model {
+        Model { value: 0 }
+    }
+
+    fn new_sut(self) -> Meter {
+        Meter::new(cap: METER_CAP, buggy: self.buggy)
+    }
+
+    fn gen_cmd(self, _ src: mut Source, _ model: Model) -> Cmd {
+        // Simplest first: shrinking prefers Add with small amounts.
+        let kind = src.draw(2)
+        if kind == 0 {
+            Cmd::Add { n: src.draw(2000) }
+        } else if kind == 1 { Cmd::Read } else { Cmd::Reset }
+    }
+
+    fn precondition(self, _ model: Model, _ cmd: Cmd) -> bool {
+        true
+    }
+
+    fn run_model(self, _ model: mut Model, _ cmd: Cmd) -> Obs {
+        match cmd {
+            Cmd::Add { n } => {
+                model.value = if model.value + n > METER_CAP {
+                    METER_CAP
+                } else {
+                    model.value + n
+                }
+                Obs { value: 0 }
+            },
+            Cmd::Reset => {
+                model.value = 0
+                Obs { value: 0 }
+            },
+            Cmd::Read => Obs { value: model.value },
+        }
+    }
+
+    fn run_sut(self, _ sut: mut Meter, _ cmd: Cmd) -> Obs {
+        match cmd {
+            Cmd::Add { n } => {
+                sut.add(n)
+                Obs { value: 0 }
+            },
+            Cmd::Reset => {
+                sut.reset()
+                Obs { value: 0 }
+            },
+            Cmd::Read => Obs { value: sut.value },
+        }
+    }
+
+    fn invariant(self, _ model: Model, _ sut: Meter) -> Verdict {
+        if sut.value > METER_CAP {
+            return Verdict::Fail { code: ABOVE_CAP }
+        }
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        if code == ABOVE_CAP {
+            write!(mut out, "the meter went past its cap")
+        } else if code == POSTCONDITION_MISMATCH {
+            write!(mut out, "Read returned a different value than the model")
+        } else {
+            write!(mut out, "unknown failure code ", code)
+        }
+    }
+}

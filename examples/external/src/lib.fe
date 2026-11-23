@@ -1,5 +1,7 @@
 // The code under test: a tiny saturating counter and a sum.
 
+pub use machine::{MeterMachine, Cmd, Obs, METER_CAP, ABOVE_CAP}
+
 /// Adds `n` to `value`, stopping at `cap`.
 pub fn add_capped(_ value: u64, _ n: u64, _ cap: u64) -> u64 {
     if n >= cap || value >= cap - n {
@@ -16,4 +18,26 @@ pub fn add_capped_buggy(_ value: u64, _ n: u64, _ cap: u64) -> u64 {
     if sum > cap + 255 {
         sum - cap
     } else if sum > cap { cap } else { sum }
+}
+
+/// A meter that accumulates readings up to a cap: the stateful code under
+/// test for the state-machine example. `buggy` selects which adder it uses.
+pub struct Meter { pub value: u64, pub cap: u64, pub buggy: bool }
+
+impl Meter {
+    pub fn new(cap: u64, buggy: bool) -> Self {
+        Meter { value: 0, cap, buggy }
+    }
+
+    pub fn add(mut self, _ n: u64) {
+        self.value = if self.buggy {
+            add_capped_buggy(self.value, n, self.cap)
+        } else {
+            add_capped(self.value, n, self.cap)
+        }
+    }
+
+    pub fn reset(mut self) {
+        self.value = 0
+    }
 }
