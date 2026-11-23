@@ -216,7 +216,8 @@ other replay result as a failure.
 
 ## Using FeCheck in your ingot
 
-New to FeCheck? [docs/first-test.md](docs/first-test.md) takes five minutes.
+New to FeCheck? [docs/first-test.md](docs/first-test.md) takes five minutes, and
+[docs/recipes.md](docs/recipes.md) has eight property patterns to copy.
 
 [examples/external](examples/external) is a complete stand-alone ingot (a
 capped adder and a `Meter` built on it, each with a seeded bug; one property,
@@ -402,6 +403,7 @@ examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
 examples/erc20/             Demo E (Fe's own ERC-20 fixture vs an ERC-20 model)
+examples/recipes/           Eight property patterns from docs/recipes.md
 examples/differential/      Demo D (Fe core arithmetic vs references, both backends)
 examples/differential_deep/ Demo D at 100x the case count, native only
 cli/                        native `fecheck` executable (Fe)
@@ -418,6 +420,7 @@ docs/                       architecture, compatibility, testing, limitations, s
 * [docs/fe-compatibility.md](docs/fe-compatibility.md): what was verified in Fe 26.6 and how the design adapted
 * [docs/first-test.md](docs/first-test.md): your first FeCheck test in five minutes
 * [docs/vs-hand-written.md](docs/vs-hand-written.md): the same bug, hand-written tests vs FeCheck
+* [docs/recipes.md](docs/recipes.md): eight property patterns, each a tested example
 * [docs/differential.md](docs/differential.md): Demo D, Fe's own arithmetic on EVM and native
 * [docs/testing.md](docs/testing.md): test inventory and recorded results
 * [docs/limitations.md](docs/limitations.md): known limitations and follow-up work

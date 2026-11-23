@@ -1,0 +1,96 @@
+// Small functions for the property recipes in docs/recipes.md. Each has a
+// correct version and, where a recipe shows that it catches a bug, a buggy
+// twin.
+
+/// Big-endian bytes of `x`.
+pub fn to_be(_ x: u64) -> [u8; 8] {
+    var out: [u8; 8] = [0; 8]
+    var i: usize = 0
+    var shift: u64 = 56
+    while i < 8 {
+        out[i] = ((x >> shift) & 0xff).downcast_saturate()
+        i += 1
+        if shift >= 8 { shift -= 8 }
+    }
+    out
+}
+
+/// The inverse of `to_be`.
+pub fn from_be(_ b: [u8; 8]) -> u64 {
+    var x: u64 = 0
+    var i: usize = 0
+    while i < 8 {
+        x = (x << 8) | (b[i] as u64)
+        i += 1
+    }
+    x
+}
+
+/// BUG: drops the top byte.
+pub fn from_be_buggy(_ b: [u8; 8]) -> u64 {
+    var x: u64 = 0
+    var i: usize = 1
+    while i < 8 {
+        x = (x << 8) | (b[i] as u64)
+        i += 1
+    }
+    x
+}
+
+/// Set bits, the obvious way: the oracle.
+pub fn popcount_slow(_ x: u64) -> u64 {
+    var n: u64 = 0
+    var v = x
+    while v != 0 {
+        n += v & 1
+        v = v >> 1
+    }
+    n
+}
+
+/// Set bits, the clever way (clear the lowest set bit each step).
+pub fn popcount_fast(_ x: u64) -> u64 {
+    var n: u64 = 0
+    var v = x
+    while v != 0 {
+        v = v & (v - 1)
+        n += 1
+    }
+    n
+}
+
+/// BUG: stops one bit early, so bit 63 is never counted.
+pub fn popcount_buggy(_ x: u64) -> u64 {
+    var n: u64 = 0
+    var v = x & 0x7FFFFFFFFFFFFFFF
+    while v != 0 {
+        v = v & (v - 1)
+        n += 1
+    }
+    n
+}
+
+/// Clamps `x` into `lo..=hi`.
+pub fn clamp(_ x: u64, _ lo: u64, _ hi: u64) -> u64 {
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
+/// Integer square root by binary search.
+pub fn isqrt(_ n: u64) -> u64 {
+    var lo: u64 = 0
+    var hi: u64 = if n < 4294967295 { n } else { 4294967295 }
+    while lo < hi {
+        let mid = lo + (hi - lo + 1) / 2
+        if mid * mid <= n {
+            lo = mid
+        } else {
+            hi = mid - 1
+        }
+    }
+    lo
+}
+
+/// Adds `x` to `total` without passing `cap`.
+pub fn add_capped(_ total: u64, _ x: u64, _ cap: u64) -> u64 {
+    if x >= cap - total { cap } else { total + x }
+}

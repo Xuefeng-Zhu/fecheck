@@ -1,0 +1,197 @@
+// The recipes in docs/recipes.md, compiled and run. Each section matches a
+// heading there.
+
+use core::MemVec
+use fecheck::{
+    Source,
+    Verdict,
+    Config,
+    check,
+    ensure,
+    assume,
+    uint_in,
+    vec_of,
+    pair,
+    Gen,
+    choices_from,
+}
+use ingot::{
+    to_be,
+    from_be,
+    from_be_buggy,
+    popcount_slow,
+    popcount_fast,
+    popcount_buggy,
+    clamp,
+    isqrt,
+    add_capped,
+}
+
+const MAX: u64 = 0xFFFFFFFFFFFFFFFF
+
+// ---- 1. Round trip: decode(encode(x)) == x
+
+fn round_trip(_ src: mut Source) -> Verdict {
+    let x = uint_in(0, MAX).generate(mut src)
+    ensure(from_be(to_be(x)) == x, 1)
+}
+
+#[test]
+fn recipe_round_trip() {
+    assert!(
+        check(
+            |src: mut Source| round_trip(mut src),
+            Config::new(seed: 1, cases: 1000),
+        ).passed(),
+    )
+}
+
+#[test]
+fn recipe_round_trip_catches_the_bug() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, MAX).generate(mut src)
+            ensure(from_be_buggy(to_be(x)) == x, 1)
+        },
+        Config::new(seed: 1, cases: 1000),
+    )
+    assert!(report.failed())
+    // Shrinks to the smallest value with a top byte: 2^56.
+    var src = Source::replay(report.shrunk, 4096)
+    assert!(uint_in(0, MAX).generate(mut src) == 72057594037927936)
+}
+
+// ---- 2. Oracle: the fast version agrees with an obvious one
+
+#[test]
+fn recipe_oracle() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, MAX).generate(mut src)
+            ensure(popcount_fast(x) == popcount_slow(x), 1)
+        },
+        Config::new(seed: 2, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+#[test]
+fn recipe_oracle_catches_the_bug() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, MAX).generate(mut src)
+            ensure(popcount_buggy(x) == popcount_slow(x), 1)
+        },
+        Config::new(seed: 2, cases: 1000),
+    )
+    assert!(report.failed())
+    var src = Source::replay(report.shrunk, 4096)
+    assert!(uint_in(0, MAX).generate(mut src) == 0x8000000000000000)
+}
+
+// ---- 3. Idempotence: doing it twice changes nothing
+
+#[test]
+fn recipe_idempotent() {
+    let report = check(
+        |src: mut Source| {
+            let x = uint_in(0, 1000).generate(mut src)
+            let (lo, hi) = pair(uint_in(0, 500), uint_in(500, 1000)).generate(mut src)
+            let once = clamp(x, lo, hi)
+            ensure(clamp(once, lo, hi) == once && once >= lo && once <= hi, 1)
+        },
+        Config::new(seed: 3, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+// ---- 4. Specification by bounds: say what the answer must satisfy
+
+#[test]
+fn recipe_bounds() {
+    let report = check(
+        |src: mut Source| {
+            let n = uint_in(0, 1000000000000).generate(mut src)
+            let r = isqrt(n)
+            // r is the largest integer whose square is at most n.
+            ensure(r * r <= n && (r + 1) * (r + 1) > n, 1)
+        },
+        Config::new(seed: 4, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+// ---- 5. Metamorphic: relate two runs instead of knowing the answer
+
+#[test]
+fn recipe_metamorphic() {
+    let report = check(
+        |src: mut Source| {
+            let a = uint_in(0, 1000000000000).generate(mut src)
+            let b = uint_in(0, 1000000000000).generate(mut src)
+            // Monotone: a bigger input never gives a smaller root.
+            if a <= b {
+                ensure(isqrt(a) <= isqrt(b), 1)
+            } else {
+                ensure(isqrt(b) <= isqrt(a), 1)
+            }
+        },
+        Config::new(seed: 5, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+// ---- 6. Invariant over a sequence
+
+#[test]
+fn recipe_invariant() {
+    let report = check(
+        |src: mut Source| {
+            let cap = uint_in(1, 1000).generate(mut src)
+            let xs = vec_of(uint_in(0, 2000), max_len: 30).generate(mut src)
+            var total: u64 = 0
+            var i: usize = 0
+            while i < xs.len() {
+                let next = add_capped(total, xs[i], cap)
+                // Never past the cap, never decreasing.
+                if next > cap || next < total {
+                    return Verdict::Fail { code: 1 }
+                }
+                total = next
+                i += 1
+            }
+            Verdict::Pass
+        },
+        Config::new(seed: 6, cases: 1000),
+    )
+    assert!(report.passed())
+}
+
+// ---- 7. Preconditions: discard inputs the property does not cover
+
+#[test]
+fn recipe_assume() {
+    let report = check(
+        |src: mut Source| {
+            let a = uint_in(0, 1000).generate(mut src)
+            let b = uint_in(0, 10).generate(mut src)
+            let ok = assume(b != 0)
+            if !ok.is_pass() { return ok }
+            ensure((a / b) * b + a % b == a, 1)
+        },
+        Config::new(seed: 7, cases: 1000),
+    )
+    assert!(report.passed())
+    assert!(report.discarded > 0)
+}
+
+// ---- 8. Pin a failure as a regression test
+
+/// The shrunk choices from `recipe_oracle_catches_the_bug`.
+#[test]
+fn recipe_regression() {
+    var src = Source::replay(choices_from([0x8000000000000000]), 4096)
+    let x = uint_in(0, MAX).generate(mut src)
+    assert!(popcount_buggy(x) != popcount_slow(x))
+    assert!(popcount_fast(x) == popcount_slow(x))
+}
