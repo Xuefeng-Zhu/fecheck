@@ -1,0 +1,20 @@
+# EVM test suites on Fe 26.7.0 (fe 26.7.0 (e6e6342)), run locally 2026-11-22 against the FeCheck source at this commit.
+# CI pins Fe 26.6.0; this file shows the same suites also pass on 26.7.0 (EVM backend; native not run).
+$ fe test ingots/fecheck
+test result: ok. 52 passed; 0 failed
+$ fe test examples/permissions
+test result: ok. 5 passed; 0 failed
+$ fe test examples/queue
+test result: ok. 5 passed; 0 failed
+$ fe test examples/contract
+test result: ok. 17 passed; 0 failed
+$ fe test examples/differential
+test result: ok. 29 passed; 0 failed
+$ fe test examples/erc20
+test result: ok. 13 passed; 0 failed
+$ fe test examples/recipes
+test result: ok. 10 passed; 0 failed
+$ fe test examples/abi
+test result: ok. 9 passed; 0 failed
+$ fe test examples/external
+test result: ok. 5 passed; 0 failed

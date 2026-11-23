@@ -12,6 +12,8 @@ backends. A small native Fe CLI adds `run`, `replay` and `demo` commands.
 
 Built for the [Fe Builders Challenge 2026](https://fe-lang.org/contest/) with
 **Fe 26.6.0**.
+Every EVM test suite also passes on Fe 26.7.0
+([docs/evidence/fe-26.7.0.txt](docs/evidence/fe-26.7.0.txt)); CI pins 26.6.0.
 
 ## What's new here
 
@@ -42,20 +44,24 @@ Demo A's in-memory system call the same Fe registry functions
 confirm on chain:
 
 1. `fecheck run permissions --seed 12345` (native CLI) fails on case 45,
-   shrinks to 4 operations and writes a `.case` file.
+   shrinks to 4 operations and writes a `.case` file. (The file's `case`
+   field is the 0-based index, so it reads `case 44`.)
 2. That file is checked in as
-   [examples/contract/cases/permissions-native.case](examples/contract/cases/permissions-native.case)
-   and pasted into [examples/contract/src/native_case.fe](examples/contract/src/native_case.fe).
-3. On the EVM, `replay_machine_with` parses it with the same pure Fe parser
-   and replays it against freshly deployed contracts: it reproduces on
-   `CachedRegistry` (same failure, same step, same `op` lines) and passes on
-   `FixedRegistry`.
+   [examples/contract/cases/permissions-native.case](examples/contract/cases/permissions-native.case).
+   `fe test` on the EVM has no filesystem effect, so a test can't open it;
+   [scripts/embed-case.py](scripts/embed-case.py) generates its lines into
+   `native_case_text()` in
+   [examples/contract/src/native_case.fe](examples/contract/src/native_case.fe).
+3. On the EVM, `replay_machine_with` parses that text with the same pure Fe
+   parser and replays it against freshly deployed contracts: it reproduces
+   on `CachedRegistry` (same failure, same step, same `op` lines) and passes
+   on `FixedRegistry`.
 
 [scripts/native-to-evm.sh](scripts/native-to-evm.sh) runs all of this in CI
 and fails if the native CLI's case differs by a byte from the checked-in
 file or the embedded text. It also runs 1,000,000 cases against the fixed
-logic natively, which took about a second on GitHub's runner
-(CI run 45124068141).
+logic natively and prints the wall-clock time
+([docs/evidence/ci-run-native-to-evm.txt](docs/evidence/ci-run-native-to-evm.txt)).
 
 ## The headline: a bug in a deployed EVM contract, found and minimized
 
