@@ -21,6 +21,12 @@ the type's width (up to 300 bits, or 255 for `u8`), because that is where
 EVM (`SHL` yields 0) and native instruction sets (which mask the count)
 naturally disagree.
 
+**Who checks the references?** Two things. Each reference is built from
+different primitives than the operation it checks, so a shared bug would have
+to appear twice in unrelated code. And a mutation check shows the suite can
+fail: changing one reference (the `u8` shift mask from `0xff` to `0x7f`) makes
+`shl_u8_agrees` fail at once.
+
 ## Result
 
 **No divergence and no wrong result found.** As of commit `5032ecb` (CI run [45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)):
@@ -39,10 +45,6 @@ A negative result is still a result: Fe 26.6's shift, division, saturation,
 narrowing and 512-bit helpers agree with their definitions on both backends
 across the cases above. The suite stays in CI as a regression net for the
 compiler and the core library.
-
-Mutation check: changing one reference (the `u8` shift mask from `0xff` to
-`0x7f`) makes `shl_u8_agrees` fail at once, so the suite can tell a
-difference.
 
 ## The properties (`examples/differential/src/lib.fe`)
 

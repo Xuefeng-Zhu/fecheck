@@ -45,7 +45,7 @@ fn amount(_ src: mut Source, _ available: u256) -> u256 {
 /// held by three Actor contracts. After every transaction the token's return
 /// value, every balance and allowance, and the total supply are compared
 /// with the model, and the balances must sum to the total supply.
-fn erc20_case<C: std::evm::Contract<InitArgs = (u256, Address)>>(_ src: mut Source) -> Verdict
+pub fn erc20_case<C: std::evm::Contract<InitArgs = (u256, Address)>>(_ src: mut Source) -> Verdict
 uses (evm: mut Evm)
 {
     let a0 = evm.create<Actor>(value: Wei::zero(), args: ())

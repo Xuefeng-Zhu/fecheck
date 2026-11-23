@@ -247,7 +247,8 @@ fn execute<M: StateMachine>(
 /// ```
 ///
 /// Fe 26.6.0 rejects a generic impl with bounds on its parameters for a trait
-/// like this one (error 6-0009, fixed upstream in 26.7.0), so pure machines
+/// like this one (error 6-0009, fixed upstream in 26.7.0 by
+/// https://github.com/argotorg/fe/pull/2000), so pure machines
 /// keep their own trait instead of an adapter over this one.
 pub trait EffectfulMachine {
     type Cmd: Copy + Display

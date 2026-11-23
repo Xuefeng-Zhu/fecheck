@@ -100,6 +100,13 @@ model, and the balances must sum to the total supply.
 (`transferFrom` that never spends the allowance) and shrinks it to an
 allowance mismatch, so the check has teeth.
 
+The test is an `EffectfulMachine`
+([examples/erc20/src/machine_tests.fe](examples/erc20/src/machine_tests.fe)):
+`type Env = Evm`, a `Deployed` SUT holding the token and actor addresses, and
+an invariant that queries the token after every transaction. For the mutant it
+shrinks to two transactions, an `approve` and a `transferFrom`. The original
+hand-rolled closure stays in `tests.fe`, and the two read each other's cases.
+
 ## The same idea from the CLI
 
 ```

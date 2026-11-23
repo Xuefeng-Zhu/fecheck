@@ -26,7 +26,9 @@ Living list. Items are honest constraints of the current implementation.
 * A machine whose SUT needs an effect (such as `Evm`) implements
   `EffectfulMachine`, a separate trait from `StateMachine`. One trait with an
   adapter would be cleaner, but Fe 26.6.0 rejects the generic adapter impl
-  (error 6-0009, fixed upstream in 26.7.0), so the two executors are kept as
+  (error 6-0009, fixed upstream in 26.7.0 by
+  [argotorg/fe#2000](https://github.com/argotorg/fe/pull/2000); a minimal
+  reproduction is in [fe-compatibility.md](fe-compatibility.md)), so the two executors are kept as
   copies; `effectful_and_pure_engines_agree` checks they produce identical
   traces. The CLI and `.case` replay (`replay_machine`) cover pure machines
   only, since the native CLI has no EVM; an effectful case replays inside

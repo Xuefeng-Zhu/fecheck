@@ -19,9 +19,10 @@ fe test --backend native ingots/fecheck
 ./scripts/contract-demo.sh        # Demo C end to end
 fe test examples/differential     # Demo D on the EVM (and with --backend native)
 fe test examples/erc20            # Demo E: CoolCoin against an ERC-20 model
+fe test examples/recipes          # eight property patterns (docs/recipes.md)
 ./scripts/external-check.sh       # FeCheck from an ingot outside the repo
 ./scripts/cli-checks.sh           # after ./scripts/build.sh
-for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/external cli; do fe fmt --check "$d"; done
+for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/external cli; do fe fmt --check "$d"; done
 ```
 
 ## Results
@@ -32,7 +33,7 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 | `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
 | `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
 | `examples/contract` (Demo C: closure, `EffectfulMachine`, hand-written comparison) | 14 passed | n/a (EVM contract) |
-| `examples/erc20` (Demo E, 1,000 sequences + mutant check) | 6 passed | n/a (EVM contract) |
+| `examples/erc20` (Demo E, `EffectfulMachine` and closure: 1,000 sequences each + mutant checks) | 13 passed | n/a (EVM contract) |
 | `examples/differential` (Demo D, 110,000 cases) | 29 passed | 29 passed (CI) |
 | `examples/differential_deep` (Demo D, 11,000,000 cases) | n/a (exceeds the EVM test gas cap) | 29 passed (CI) |
 | `examples/recipes` (eight property patterns) | 10 passed | 10 passed (CI) |

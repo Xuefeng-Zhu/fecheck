@@ -1,0 +1,384 @@
+// Demo E as an `EffectfulMachine`. Same model, same commands and the same
+// choice encoding as the closure in tests.fe, so the two read each other's
+// cases; here the engine owns the loop, the preconditions, the postcondition
+// (each transaction's return value) and the trace.
+
+use core::MemBuffer
+use std::evm::Evm
+use std::io::Display
+use fecheck::{
+    Source,
+    Verdict,
+    Config,
+    check,
+    copy_choices,
+    EffectfulMachine,
+    Steps,
+    steps,
+    run_steps_with,
+    run_traced_with,
+}
+use ingot::{CoolCoin, MutantCoin, Erc20, Erc20Extended, Actor, ActorMsg}
+use super::tests::{
+    BALANCE_MISMATCH,
+    ALLOWANCE_MISMATCH,
+    SUPPLY_MISMATCH,
+    SUPPLY_NOT_SUM,
+    ACTORS,
+    INITIAL_SUPPLY,
+    erc20_case,
+}
+
+pub enum TokenCmd {
+    Transfer {
+        pub from: u64,
+        pub to: u64,
+        pub amount: u256,
+    },
+    Approve {
+        pub owner: u64,
+        pub spender: u64,
+        pub amount: u256,
+    },
+    TransferFrom {
+        pub spender: u64,
+        pub from: u64,
+        pub to: u64,
+        pub amount: u256,
+    },
+    Mint { pub to: u64, pub amount: u256 },
+}
+impl Copy for TokenCmd {}
+impl Display for TokenCmd {
+    fn fmt(self, _ out: mut MemBuffer) {
+        match self {
+            TokenCmd::Transfer { from, to, amount } => write!(
+                mut out,
+                "A",
+                from,
+                ".transfer(A",
+                to,
+                ", ",
+                amount,
+                ")",
+            ),
+            TokenCmd::Approve { owner, spender, amount } => write!(
+                mut out,
+                "A",
+                owner,
+                ".approve(A",
+                spender,
+                ", ",
+                amount,
+                ")",
+            ),
+            TokenCmd::TransferFrom { spender, from, to, amount } => write!(
+                mut out,
+                "A",
+                spender,
+                ".transferFrom(A",
+                from,
+                ", A",
+                to,
+                ", ",
+                amount,
+                ")",
+            ),
+            TokenCmd::Mint { to, amount } => write!(mut out, "mint(A", to, ", ", amount, ")"),
+        }
+    }
+}
+
+pub struct TokenModel { pub balances: [u256; 3], pub allowances: [u256; 9], pub supply: u256 }
+impl Copy for TokenModel {}
+
+pub struct Deployed { pub token: Address, pub actors: [Address; 3] }
+impl Copy for Deployed {}
+
+fn idx(_ i: u64) -> usize {
+    let r: usize = i.downcast_saturate()
+    r
+}
+
+fn slot(_ owner: u64, _ spender: u64) -> usize {
+    idx(owner * ACTORS + spender)
+}
+
+/// Same edge bias as `amount` in tests.fe: any of 0..=1500, exactly the
+/// available balance or allowance, one more than it, or 0.
+fn amount(_ src: mut Source, _ available: u256) -> u256 {
+    let shape = src.draw(3)
+    if shape == 0 {
+        return src.draw(1500) as u256
+    }
+    if shape == 1 {
+        return available
+    }
+    if shape == 2 {
+        return available + 1
+    }
+    0
+}
+
+/// `mutant` deploys MutantCoin (transferFrom never spends the allowance).
+pub struct Erc20Machine { pub mutant: bool }
+impl Copy for Erc20Machine {}
+
+impl EffectfulMachine for Erc20Machine {
+    type Cmd = TokenCmd
+    type Obs = bool
+    type Model = TokenModel
+    type Sut = Deployed
+    type Env = Evm
+
+    fn new_model(self) -> TokenModel {
+        TokenModel { balances: [INITIAL_SUPPLY, 0, 0], allowances: [0; 9], supply: INITIAL_SUPPLY }
+    }
+
+    fn new_sut(self) -> Deployed uses (env: mut Evm) {
+        let a0 = env.create<Actor>(value: Wei::zero(), args: ())
+        let a1 = env.create<Actor>(value: Wei::zero(), args: ())
+        let a2 = env.create<Actor>(value: Wei::zero(), args: ())
+        let token = if self.mutant {
+            env.create<MutantCoin>(value: Wei::zero(), args: (INITIAL_SUPPLY, a0))
+        } else {
+            env.create<CoolCoin>(value: Wei::zero(), args: (INITIAL_SUPPLY, a0))
+        }
+        Deployed { token, actors: [a0, a1, a2] }
+    }
+
+    fn gen_cmd(self, _ src: mut Source, _ m: TokenModel) -> TokenCmd {
+        let kind = src.draw(3)
+        let i = src.draw(ACTORS - 1)
+        let j = src.draw(ACTORS - 1)
+        if kind == 0 {
+            TokenCmd::Transfer { from: i, to: j, amount: amount(mut src, m.balances[idx(i)]) }
+        } else if kind == 1 {
+            TokenCmd::Approve { owner: i, spender: j, amount: amount(mut src, m.balances[idx(i)]) }
+        } else if kind == 2 {
+            let k = src.draw(ACTORS - 1)
+            TokenCmd::TransferFrom {
+                spender: k,
+                from: i,
+                to: j,
+                amount: amount(mut src, m.allowances[slot(i, k)]),
+            }
+        } else {
+            TokenCmd::Mint { to: j, amount: src.draw(1500) as u256 }
+        }
+    }
+
+    fn precondition(self, _ m: TokenModel, _ cmd: TokenCmd) -> bool {
+        true
+    }
+
+    /// The expected return value; failed transfers change nothing.
+    fn run_model(self, _ m: mut TokenModel, _ cmd: TokenCmd) -> bool {
+        match cmd {
+            TokenCmd::Transfer { from, to, amount } => {
+                let ok = m.balances[idx(from)] >= amount
+                if ok {
+                    m.balances[idx(from)] = m.balances[idx(from)] - amount
+                    m.balances[idx(to)] = m.balances[idx(to)] + amount
+                }
+                ok
+            },
+            TokenCmd::Approve { owner, spender, amount } => {
+                m.allowances[slot(owner, spender)] = amount
+                true
+            },
+            TokenCmd::TransferFrom { spender, from, to, amount } => {
+                let allowed = m.allowances[slot(from, spender)]
+                let ok = allowed >= amount && m.balances[idx(from)] >= amount
+                if ok {
+                    m.allowances[slot(from, spender)] = allowed - amount
+                    m.balances[idx(from)] = m.balances[idx(from)] - amount
+                    m.balances[idx(to)] = m.balances[idx(to)] + amount
+                }
+                ok
+            },
+            TokenCmd::Mint { to, amount } => {
+                m.supply = m.supply + amount
+                m.balances[idx(to)] = m.balances[idx(to)] + amount
+                true
+            },
+        }
+    }
+
+    fn run_sut(self, _ d: mut Deployed, _ cmd: TokenCmd) -> bool
+    uses (env: mut Evm)
+    {
+        match cmd {
+            TokenCmd::Transfer { from, to, amount } => env.call(
+                addr: d.actors[idx(from)],
+                gas: 1000000,
+                value: Wei::zero(),
+                message: ActorMsg::DoTransfer { token: d.token, to: d.actors[idx(to)], amount },
+            ),
+            TokenCmd::Approve { owner, spender, amount } => env.call(
+                addr: d.actors[idx(owner)],
+                gas: 1000000,
+                value: Wei::zero(),
+                message: ActorMsg::DoApprove {
+                    token: d.token,
+                    spender: d.actors[idx(spender)],
+                    amount,
+                },
+            ),
+            TokenCmd::TransferFrom { spender, from, to, amount } => env.call(
+                addr: d.actors[idx(spender)],
+                gas: 1000000,
+                value: Wei::zero(),
+                message: ActorMsg::DoTransferFrom {
+                    token: d.token,
+                    from: d.actors[idx(from)],
+                    to: d.actors[idx(to)],
+                    amount,
+                },
+            ),
+            TokenCmd::Mint { to, amount } => env.call(
+                addr: d.token,
+                gas: 1000000,
+                value: Wei::zero(),
+                message: Erc20Extended::Mint { to: d.actors[idx(to)], amount },
+            ),
+        }
+    }
+
+    /// Every balance and allowance and the supply match the model, and the
+    /// balances sum to the supply.
+    fn invariant(self, _ m: TokenModel, _ d: Deployed) -> Verdict
+    uses (env: mut Evm)
+    {
+        var sum: u256 = 0
+        var o: u64 = 0
+        while o < ACTORS {
+            let bal: u256 = env
+                .call(
+                    addr: d.token,
+                    gas: 1000000,
+                    value: Wei::zero(),
+                    message: Erc20::BalanceOf { account: d.actors[idx(o)] },
+                )
+            if bal != m.balances[idx(o)] {
+                return Verdict::Fail { code: BALANCE_MISMATCH }
+            }
+            sum = sum + bal
+            var s: u64 = 0
+            while s < ACTORS {
+                let allow: u256 = env
+                    .call(
+                        addr: d.token,
+                        gas: 1000000,
+                        value: Wei::zero(),
+                        message: Erc20::Allowance {
+                            owner: d.actors[idx(o)],
+                            spender: d.actors[idx(s)],
+                        },
+                    )
+                if allow != m.allowances[slot(o, s)] {
+                    return Verdict::Fail { code: ALLOWANCE_MISMATCH }
+                }
+                s += 1
+            }
+            o += 1
+        }
+        let supply: u256 = env
+            .call(
+                addr: d.token,
+                gas: 1000000,
+                value: Wei::zero(),
+                message: Erc20::TotalSupply {},
+            )
+        if supply != m.supply {
+            return Verdict::Fail { code: SUPPLY_MISMATCH }
+        }
+        if sum != supply {
+            return Verdict::Fail { code: SUPPLY_NOT_SUM }
+        }
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        if code == ALLOWANCE_MISMATCH {
+            write!(mut out, "an allowance differs from the model")
+        } else if code == BALANCE_MISMATCH {
+            write!(mut out, "a balance differs from the model")
+        } else if code == SUPPLY_MISMATCH {
+            write!(mut out, "totalSupply differs from the model")
+        } else if code == SUPPLY_NOT_SUM {
+            write!(mut out, "balances do not sum to totalSupply")
+        } else {
+            write!(
+                mut out,
+                "a transaction returned what the model did not expect",
+            )
+        }
+    }
+}
+
+fn token_steps() -> Steps {
+    steps(25, 12)
+}
+
+fn machine_passes(_ seed: u64) -> bool uses (evm: mut Evm) {
+    check(
+        |src: mut Source| run_steps_with(Erc20Machine { mutant: false }, mut src, token_steps()),
+        Config::new(seed, cases: 200),
+    )
+        .passed()
+}
+
+#[test]
+fn machine_coolcoin_seed_1() uses (evm: mut Evm) {
+    assert!(machine_passes(1))
+}
+
+#[test]
+fn machine_coolcoin_seed_2() uses (evm: mut Evm) {
+    assert!(machine_passes(2))
+}
+
+#[test]
+fn machine_coolcoin_seed_3() uses (evm: mut Evm) {
+    assert!(machine_passes(3))
+}
+
+#[test]
+fn machine_coolcoin_seed_4() uses (evm: mut Evm) {
+    assert!(machine_passes(4))
+}
+
+#[test]
+fn machine_coolcoin_seed_5() uses (evm: mut Evm) {
+    assert!(machine_passes(5))
+}
+
+#[test]
+fn machine_catches_the_mutant() uses (evm: mut Evm) {
+    let report = check(
+        |src: mut Source| run_steps_with(Erc20Machine { mutant: true }, mut src, token_steps()),
+        Config::new(seed: 2026, cases: 200),
+    )
+    assert!(report.failed())
+    assert!(report.shrunk_verdict.code() == ALLOWANCE_MISMATCH)
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let trace = run_traced_with(Erc20Machine { mutant: true }, mut src, token_steps())
+    // The shortest story: an approve, then a transferFrom that should spend it.
+    assert!(trace.executed == 2)
+    assert!(trace.explanation == "an allowance differs from the model")
+}
+
+/// The closure in tests.fe and this machine read the same choices: the
+/// closure's shrunk counterexample fails the machine the same way.
+#[test]
+fn machine_and_closure_share_cases() uses (evm: mut Evm) {
+    let report = check(
+        |src: mut Source| erc20_case<MutantCoin>(mut src),
+        Config::new(seed: 2026, cases: 200),
+    )
+    assert!(report.failed())
+    var src = Source::replay(copy_choices(report.shrunk), 4096)
+    let v = run_steps_with(Erc20Machine { mutant: true }, mut src, token_steps())
+    assert!(v.code() == report.shrunk_verdict.code())
+}
