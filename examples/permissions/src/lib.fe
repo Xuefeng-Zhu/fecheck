@@ -1,6 +1,17 @@
 // Demo A: state-machine testing of an agent permission system.
 
-pub use system::{AGENTS, PermissionApi, CachedPermissions, FixedPermissions}
+pub use system::{
+    AGENTS,
+    PermissionApi,
+    CachedPermissions,
+    FixedPermissions,
+    Grants,
+    Cache,
+    registry_grant,
+    registry_revoke_cached,
+    registry_revoke_fixed,
+    registry_execute,
+}
 pub use machine::{
     Cmd,
     Obs,

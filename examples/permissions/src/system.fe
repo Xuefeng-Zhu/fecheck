@@ -13,6 +13,73 @@
 
 pub const AGENTS: u64 = 4
 
+// The registry's logic, written once. `CachedPermissions` below runs it over
+// an in-memory array; Demo C's contracts (examples/contract) run the same
+// functions over contract storage. Only the grant table differs.
+
+/// Where grants live: an array here, a `StorageMap` in a contract.
+pub trait Grants {
+    fn is_granted(self, _ agent: u256) -> bool
+    fn set_granted(mut self, _ agent: u256, _ value: bool)
+}
+
+/// The last authorisation decision.
+pub struct Cache { pub valid: bool, pub agent: u256, pub allowed: bool }
+
+impl Copy for Cache {}
+
+impl Cache {
+    pub fn empty() -> Self {
+        Cache { valid: false, agent: 0, allowed: false }
+    }
+}
+
+pub fn registry_grant<G: Grants>(_ grants: mut G, _ cache: mut Cache, _ agent: u256) {
+    grants.set_granted(agent, true)
+    // A new grant can only widen access, so the cache is refreshed.
+    cache.valid = false
+}
+
+/// BUG: the cached decision for `agent` is left in place.
+pub fn registry_revoke_cached<G: Grants>(_ grants: mut G, _ cache: mut Cache, _ agent: u256) {
+    grants.set_granted(agent, false)
+}
+
+/// FIX: a revoke invalidates the cached decision.
+pub fn registry_revoke_fixed<G: Grants>(_ grants: mut G, _ cache: mut Cache, _ agent: u256) {
+    grants.set_granted(agent, false)
+    cache.valid = false
+}
+
+/// Whether `agent` may execute right now.
+pub fn registry_execute<G: Grants>(_ grants: G, _ cache: mut Cache, _ agent: u256) -> bool {
+    if cache.valid && cache.agent == agent {
+        return cache.allowed
+    }
+    let allowed = grants.is_granted(agent)
+    cache.valid = true
+    cache.agent = agent
+    cache.allowed = allowed
+    allowed
+}
+
+/// Grants for agents 0 to 3 in an array.
+pub struct ArrayGrants { granted: [bool; 4] }
+
+impl Copy for ArrayGrants {}
+
+impl Grants for ArrayGrants {
+    fn is_granted(self, _ agent: u256) -> bool {
+        let i: usize = agent.downcast_saturate()
+        self.granted[i]
+    }
+
+    fn set_granted(mut self, _ agent: u256, _ value: bool) {
+        let i: usize = agent.downcast_saturate()
+        self.granted[i] = value
+    }
+}
+
 pub trait PermissionApi {
     fn grant(mut self, _ agent: u64)
     fn revoke(mut self, _ agent: u64)
@@ -20,91 +87,51 @@ pub trait PermissionApi {
     fn execute(mut self, _ agent: u64) -> bool
 }
 
-pub struct CachedPermissions {
-    granted: [bool; 4],
-    cache_valid: bool,
-    cache_agent: u64,
-    cache_allowed: bool,
-}
+pub struct CachedPermissions { grants: ArrayGrants, cache: Cache }
 
 impl Copy for CachedPermissions {}
 
 impl CachedPermissions {
     pub fn new() -> Self {
-        CachedPermissions {
-            granted: [false; 4],
-            cache_valid: false,
-            cache_agent: 0,
-            cache_allowed: false,
-        }
+        CachedPermissions { grants: ArrayGrants { granted: [false; 4] }, cache: Cache::empty() }
     }
 }
 
 impl PermissionApi for CachedPermissions {
     fn grant(mut self, _ agent: u64) {
-        self.granted[idx(agent)] = true
-        // A new grant can only widen access, so the cache is refreshed.
-        self.cache_valid = false
+        registry_grant(mut self.grants, mut self.cache, agent as u256)
     }
 
     fn revoke(mut self, _ agent: u64) {
-        self.granted[idx(agent)] = false
-        // BUG: the cached decision for `agent` is left in place.
+        registry_revoke_cached(mut self.grants, mut self.cache, agent as u256)
     }
 
     fn execute(mut self, _ agent: u64) -> bool {
-        if self.cache_valid && self.cache_agent == agent {
-            return self.cache_allowed
-        }
-        let allowed = self.granted[idx(agent)]
-        self.cache_valid = true
-        self.cache_agent = agent
-        self.cache_allowed = allowed
-        allowed
+        registry_execute(self.grants, mut self.cache, agent as u256)
     }
 }
 
-pub struct FixedPermissions {
-    granted: [bool; 4],
-    cache_valid: bool,
-    cache_agent: u64,
-    cache_allowed: bool,
-}
+pub struct FixedPermissions { grants: ArrayGrants, cache: Cache }
 
 impl Copy for FixedPermissions {}
 
 impl FixedPermissions {
     pub fn new() -> Self {
-        FixedPermissions {
-            granted: [false; 4],
-            cache_valid: false,
-            cache_agent: 0,
-            cache_allowed: false,
-        }
+        FixedPermissions { grants: ArrayGrants { granted: [false; 4] }, cache: Cache::empty() }
     }
 }
 
 impl PermissionApi for FixedPermissions {
     fn grant(mut self, _ agent: u64) {
-        self.granted[idx(agent)] = true
-        self.cache_valid = false
+        registry_grant(mut self.grants, mut self.cache, agent as u256)
     }
 
     fn revoke(mut self, _ agent: u64) {
-        self.granted[idx(agent)] = false
-        // FIX: a revoke invalidates the cached decision.
-        self.cache_valid = false
+        registry_revoke_fixed(mut self.grants, mut self.cache, agent as u256)
     }
 
     fn execute(mut self, _ agent: u64) -> bool {
-        if self.cache_valid && self.cache_agent == agent {
-            return self.cache_allowed
-        }
-        let allowed = self.granted[idx(agent)]
-        self.cache_valid = true
-        self.cache_agent = agent
-        self.cache_allowed = allowed
-        allowed
+        registry_execute(self.grants, mut self.cache, agent as u256)
     }
 }
 

@@ -27,6 +27,8 @@ jobs:
         run: ./scripts/test.sh
       - name: EVM contract counterexample (Demo C)
         run: ./scripts/contract-demo.sh
+      - name: Find natively, confirm on chain
+        run: ./scripts/native-to-evm.sh
       - name: Demo
         run: ./out/fecheck demo --dir ci-failures
       - uses: actions/upload-artifact@v4

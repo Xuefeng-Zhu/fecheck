@@ -8,6 +8,14 @@
 
 use std::abi::sol
 use std::evm::{Evm, StorageMap}
+use permissions::{
+    Grants,
+    Cache,
+    registry_grant,
+    registry_revoke_cached,
+    registry_revoke_fixed,
+    registry_execute,
+}
 
 msg PermissionMsg {
     #[selector = sol("grant(uint256)")]
@@ -18,74 +26,57 @@ msg PermissionMsg {
     Execute { agent: u256 } -> bool,
 }
 
+/// The grant table in contract storage. The registry logic itself is the
+/// same Fe code the native Demo A runs (`permissions::registry_*`).
+pub struct GrantTable { map: StorageMap<u256, bool> }
+
+impl Grants for GrantTable {
+    fn is_granted(self, _ agent: u256) -> bool {
+        self.map.get(key: agent)
+    }
+
+    fn set_granted(mut self, _ agent: u256, _ value: bool) {
+        self.map.set(key: agent, value: value)
+    }
+}
+
 /// Remembers the last authorisation decision to save an SLOAD on repeats.
 /// BUG: `Revoke` does not clear the cached decision.
 pub contract CachedRegistry {
-    mut granted: StorageMap<u256, bool>,
-    mut cache_valid: bool,
-    mut cache_agent: u256,
-    mut cache_allowed: bool,
+    mut granted: GrantTable,
+    mut cache: Cache,
 
     recv PermissionMsg {
-        Grant { agent } uses (mut granted, mut cache_valid) {
-            granted.set(key: agent, value: true)
-            cache_valid = false
+        Grant { agent } uses (mut granted, mut cache) {
+            registry_grant(mut granted, mut cache, agent)
         }
 
-        Revoke { agent } uses (mut granted) {
-            granted.set(key: agent, value: false)
+        Revoke { agent } uses (mut granted, mut cache) {
+            registry_revoke_cached(mut granted, mut cache, agent)
         }
 
-        Execute { agent } -> bool uses (
-            granted,
-            mut cache_valid,
-            mut cache_agent,
-            mut cache_allowed,
-        ) {
-            if cache_valid && cache_agent == agent {
-                return cache_allowed
-            }
-            let allowed = granted.get(key: agent)
-            cache_valid = true
-            cache_agent = agent
-            cache_allowed = allowed
-            allowed
+        Execute { agent } -> bool uses (granted, mut cache) {
+            registry_execute(granted, mut cache, agent)
         }
     }
 }
 
 /// The same registry with the cache invalidated on revoke.
 pub contract FixedRegistry {
-    mut granted: StorageMap<u256, bool>,
-    mut cache_valid: bool,
-    mut cache_agent: u256,
-    mut cache_allowed: bool,
+    mut granted: GrantTable,
+    mut cache: Cache,
 
     recv PermissionMsg {
-        Grant { agent } uses (mut granted, mut cache_valid) {
-            granted.set(key: agent, value: true)
-            cache_valid = false
+        Grant { agent } uses (mut granted, mut cache) {
+            registry_grant(mut granted, mut cache, agent)
         }
 
-        Revoke { agent } uses (mut granted, mut cache_valid) {
-            granted.set(key: agent, value: false)
-            cache_valid = false
+        Revoke { agent } uses (mut granted, mut cache) {
+            registry_revoke_fixed(mut granted, mut cache, agent)
         }
 
-        Execute { agent } -> bool uses (
-            granted,
-            mut cache_valid,
-            mut cache_agent,
-            mut cache_allowed,
-        ) {
-            if cache_valid && cache_agent == agent {
-                return cache_allowed
-            }
-            let allowed = granted.get(key: agent)
-            cache_valid = true
-            cache_agent = agent
-            cache_allowed = allowed
-            allowed
+        Execute { agent } -> bool uses (granted, mut cache) {
+            registry_execute(granted, mut cache, agent)
         }
     }
 }

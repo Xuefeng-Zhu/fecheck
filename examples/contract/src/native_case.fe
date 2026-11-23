@@ -1,0 +1,237 @@
+// Find natively, confirm on chain.
+//
+// The registry logic is one Fe source (`permissions::registry_*`). Natively
+// it runs as Demo A, where the CLI can search millions of cases quickly;
+// on the EVM it runs inside CachedRegistry and FixedRegistry. A case file the
+// native CLI wrote is pasted below verbatim, parsed by the same pure Fe
+// parser, and replayed here against freshly deployed contracts.
+//
+// `OnChainPermissions` is Demo A's machine with the system swapped for a
+// deployed contract: generation, preconditions, the model and the failure
+// codes are delegated to `PermissionMachine`, so the same choices produce
+// the same `op` lines and replay can check them verbatim.
+//
+// scripts/native-to-evm.sh regenerates the case with the native CLI and
+// fails if it differs from the text below, so the two can't drift apart.
+
+use core::MemBuffer
+use std::evm::Evm
+use fecheck::{
+    Source,
+    Config,
+    check,
+    run_steps,
+    run_traced,
+    copy_choices,
+    machine_case,
+    encode,
+    DEFAULT_MAX_CHOICES,
+    Verdict,
+    StateMachine,
+    EffectfulMachine,
+    ReplayOutcome,
+    decode,
+    replay_machine_with,
+    steps,
+}
+use permissions::{Cmd, Obs, Model, PermissionMachine, against_cached, REVOKED_AGENT_EXECUTED}
+use permissions::{CachedPermissions}
+use ingot::{CachedRegistry, FixedRegistry, PermissionMsg}
+
+/// The deployed registry, plus what it last decided (for the invariant).
+pub struct Deployed { pub addr: Address, pub allowed_now: bool, pub allowed_agent: u64 }
+
+impl Copy for Deployed {}
+
+pub struct OnChainPermissions { pub fixed: bool }
+
+impl Copy for OnChainPermissions {}
+
+fn spec() -> PermissionMachine<CachedPermissions> {
+    // Only its pure parts are used: generation, preconditions, the model and
+    // the failure descriptions do not depend on the system under test.
+    against_cached()
+}
+
+impl EffectfulMachine for OnChainPermissions {
+    type Cmd = Cmd
+    type Obs = Obs
+    type Model = Model
+    type Sut = Deployed
+    type Env = Evm
+
+    fn new_model(self) -> Model {
+        spec().new_model()
+    }
+
+    fn new_sut(self) -> Deployed uses (env: mut Evm) {
+        let addr = if self.fixed {
+            env.create<FixedRegistry>(value: Wei::zero(), args: ())
+        } else {
+            env.create<CachedRegistry>(value: Wei::zero(), args: ())
+        }
+        Deployed { addr, allowed_now: false, allowed_agent: 0 }
+    }
+
+    fn gen_cmd(self, _ src: mut Source, _ model: Model) -> Cmd {
+        spec().gen_cmd(mut src, model)
+    }
+
+    fn precondition(self, _ model: Model, _ cmd: Cmd) -> bool {
+        spec().precondition(model, cmd)
+    }
+
+    fn run_model(self, _ model: mut Model, _ cmd: Cmd) -> Obs {
+        spec().run_model(mut model, cmd)
+    }
+
+    fn run_sut(self, _ sut: mut Deployed, _ cmd: Cmd) -> Obs uses (env: mut Evm) {
+        sut.allowed_now = false
+        match cmd {
+            Cmd::Grant { agent } => {
+                env.call(
+                    addr: sut.addr,
+                    gas: 200000,
+                    value: Wei::zero(),
+                    message: PermissionMsg::Grant { agent: agent as u256 },
+                )
+                Obs::Done
+            },
+            Cmd::Revoke { agent } => {
+                env.call(
+                    addr: sut.addr,
+                    gas: 200000,
+                    value: Wei::zero(),
+                    message: PermissionMsg::Revoke { agent: agent as u256 },
+                )
+                Obs::Done
+            },
+            Cmd::Execute { agent } => {
+                let allowed: bool = env
+                    .call(
+                        addr: sut.addr,
+                        gas: 200000,
+                        value: Wei::zero(),
+                        message: PermissionMsg::Execute { agent: agent as u256 },
+                    )
+                sut.allowed_now = allowed
+                sut.allowed_agent = agent
+                if allowed { Obs::Allowed } else { Obs::Denied }
+            },
+        }
+    }
+
+    fn invariant(self, _ model: Model, _ sut: Deployed) -> Verdict
+    uses (env: mut Evm)
+    {
+        let i: usize = sut.allowed_agent.downcast_saturate()
+        if sut.allowed_now && !model.granted[i] {
+            return Verdict::Fail { code: REVOKED_AGENT_EXECUTED }
+        }
+        Verdict::Pass
+    }
+
+    fn describe_failure(self, _ code: u64, _ out: mut MemBuffer) {
+        spec().describe_failure(code, mut out)
+    }
+}
+
+/// examples/contract/cases/permissions-native.case, written by
+/// `fecheck run permissions --seed 12345 --save <file>` (native CLI).
+pub fn native_case_text() -> MemBuffer {
+    var out = MemBuffer::new(0)
+    writeln!(
+        mut out,
+        "# FeCheck regression case. Replay with: fecheck replay <this file>",
+    )
+    writeln!(mut out, "fecheck-case 2")
+    writeln!(mut out, "test revoked_agent_cannot_execute")
+    writeln!(mut out, "target permissions")
+    writeln!(mut out, "compiler fe 26.6.0")
+    writeln!(mut out, "fecheck 0.2.0")
+    writeln!(mut out, "seed 12345")
+    writeln!(mut out, "case 44")
+    writeln!(mut out, "cases 1000")
+    writeln!(mut out, "steps 40 12")
+    writeln!(mut out, "verdict fail 1")
+    writeln!(mut out, "failed-step 3")
+    writeln!(mut out, "original-length 7")
+    writeln!(mut out, "choices 1 0 2 1 2 2 1 1 2 1 2 2")
+    writeln!(mut out, "op Grant(agent=2)")
+    writeln!(mut out, "op Execute(agent=2)")
+    writeln!(mut out, "op Revoke(agent=2)")
+    writeln!(mut out, "op Execute(agent=2)")
+    writeln!(
+        mut out,
+        "violation revoked_agent_cannot_execute: an agent without a current grant was allowed to execute",
+    )
+    writeln!(mut out, "end")
+    out
+}
+
+#[test]
+fn native_case_reproduces_on_the_deployed_contract() uses (evm: mut Evm) {
+    let text = native_case_text()
+    let case = match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => {
+            assert!(false)
+            return
+        },
+    }
+    let (outcome, trace) = replay_machine_with(
+        OnChainPermissions { fixed: false },
+        steps(40, 12),
+        case,
+    )
+    assert!(outcome.is_reproduced())
+    assert!(trace.failed_step == 3)
+    assert!(trace.steps[3].command == "Execute(agent=2)")
+    assert!(trace.steps[3].actual == "allowed")
+}
+
+#[test]
+fn native_case_passes_on_the_fixed_contract() uses (evm: mut Evm) {
+    let text = native_case_text()
+    let case = match decode(text.span()) {
+        Result::Ok(c) => c,
+        Result::Err(_) => {
+            assert!(false)
+            return
+        },
+    }
+    let (outcome, _trace) = replay_machine_with(
+        OnChainPermissions { fixed: true },
+        steps(40, 12),
+        case,
+    )
+    assert!(outcome.kind() == 1)
+}
+
+/// The pure engine, run here on the EVM with the CLI's settings, writes the
+/// same bytes the native CLI wrote: the search itself is backend-agnostic.
+#[test]
+fn the_evm_engine_writes_the_same_case() {
+    let s = steps(40, 12)
+    let report = check(
+        |src: mut Source| run_steps(against_cached(), mut src, s),
+        Config::new(seed: 12345, cases: 1000),
+    )
+    var original_src = Source::replay(copy_choices(report.original), DEFAULT_MAX_CHOICES)
+    let original = run_traced(against_cached(), mut original_src, s)
+    var shrunk_src = Source::replay(copy_choices(report.shrunk), DEFAULT_MAX_CHOICES)
+    let trace = run_traced(against_cached(), mut shrunk_src, s)
+    let case = machine_case(
+        test: format!("revoked_agent_cannot_execute"),
+        target: format!("permissions"),
+        compiler: format!("fe 26.6.0"),
+        seed: 12345,
+        case_index: report.failing_case,
+        cases: 1000,
+        steps: s,
+        original_length: original.len(),
+        report.shrunk,
+        trace,
+    )
+    assert!(encode(case).span() == native_case_text().span())
+}

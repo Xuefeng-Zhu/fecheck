@@ -55,5 +55,12 @@ pub use artifact::{
     MIN_SCHEMA_VERSION,
     FECHECK_VERSION,
 }
-pub use replay::{ReplayOutcome, replay_property, replay_machine, machine_case, case_steps}
+pub use replay::{
+    ReplayOutcome,
+    replay_property,
+    replay_machine,
+    replay_machine_with,
+    machine_case,
+    case_steps,
+}
 pub use json::{case_json, write_json_string}

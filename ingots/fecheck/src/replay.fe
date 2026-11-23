@@ -18,7 +18,16 @@ use core::{MemBuffer, MemVec}
 use super::source::{Source, copy_choices, DEFAULT_MAX_CHOICES}
 use super::verdict::Verdict
 use super::artifact::{Case, LEGACY_STEPS_MAX, LEGACY_STEPS_MEAN}
-use super::machine::{StateMachine, Steps, Trace, run_traced, steps as make_steps, NO_STEP}
+use super::machine::{
+    StateMachine,
+    EffectfulMachine,
+    Steps,
+    Trace,
+    run_traced,
+    run_traced_with,
+    steps as make_steps,
+    NO_STEP,
+}
 
 pub enum ReplayOutcome {
     /// The recorded failure happened again, at the same step.
@@ -109,6 +118,43 @@ pub fn replay_machine<M: StateMachine>(_ machine: M, _ fallback: Steps, _ case: 
     // the generator disagree. (Reads past the end return 0, which stops the
     // sequence; a fixed target that passes the last recorded operation makes
     // exactly one such read.)
+    if !src.overran() && src.unread() != 0 {
+        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
+    }
+    let outcome = classify(trace.verdict, src.overran(), trace.failed_step, case)
+    (outcome, trace)
+}
+
+/// `replay_machine` for an `EffectfulMachine`: the same checks, with the
+/// test's effect (for example the `fe test` EVM) supplied to the machine. A
+/// case found by a pure machine replays here against a deployed contract when
+/// the two machines generate the same commands.
+pub fn replay_machine_with<M: EffectfulMachine>(_ machine: M, _ fallback: Steps, _ case: Case) -> (
+    ReplayOutcome,
+    Trace,
+)
+uses (env: mut M::Env)
+{
+    let s = if case.has_steps {
+        case_steps(case)
+    } else {
+        fallback
+    }
+    var src = Source::replay(copy_choices(case.choices), DEFAULT_MAX_CHOICES)
+    let trace = run_traced_with(machine, mut src, s)
+    var i: usize = 0
+    while i < case.ops.len() {
+        if i >= trace.steps.len() {
+            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
+        }
+        if trace.steps[i].command != case.ops[i] {
+            return (ReplayOutcome::Drift { step: i.downcast_saturate() }, trace)
+        }
+        i += 1
+    }
+    if trace.steps.len() != case.ops.len() {
+        return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
+    }
     if !src.overran() && src.unread() != 0 {
         return (ReplayOutcome::Drift { step: case.ops.len().downcast_saturate() }, trace)
     }
