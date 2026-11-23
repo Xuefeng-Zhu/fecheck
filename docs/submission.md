@@ -9,9 +9,9 @@ violation, shrinks it to a short story, saves it as a portable `.case` file,
 and replays it after the fix, from `fe test` or a native CLI.
 
 Beyond the planted-bug demos, FeCheck was pointed at code it did not write:
-Fe 26.6's own integer arithmetic, checked against independent Fe references
+Fe 26.6's own integer arithmetic, checked against Fe references
 on each backend (29 differential properties, 110,000 cases per backend plus
-11 million native, no divergence), Fe's Solidity ABI encoder and decoder
+11 million native, all sampled results agreed with their references), Fe's Solidity ABI encoder and decoder
 against the spec (18,000 cases, no bug) and the ERC-20 from the Fe compiler's test suite (1,000
 model-checked transaction sequences across three holder contracts, no bug;
 a one-line mutant is caught).
@@ -29,9 +29,7 @@ the native CLI finds replays byte-for-byte against those contracts on the
 `fe test` EVM, checked in CI (`scripts/native-to-evm.sh`).
 
 The engine itself declares no concrete effects, and Fe has no ambient I/O,
-so no generator, shrinker or parser can read a file or a clock; only the CLI
-file declares `Stdout`, `Args` and `Fs`. A test that holds an effect can
-still be nondeterministic, which the shrinker checks for.
+so no generator, shrinker or parser can read a file or a clock; the native CLI supplies host capabilities. A callback can depend on shared state or replay mode. The runner confirms both the original and normalized failure with exact choice consumption.
 
 ## What to run
 

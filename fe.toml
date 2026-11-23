@@ -1,5 +1,5 @@
 [workspace]
 name = "fecheck_workspace"
-version = "0.1.0"
+version = "0.3.0"
 members = ["ingots/fecheck", "examples/permissions", "examples/queue", "examples/contract", "examples/differential", "examples/differential_deep", "examples/erc20", "examples/recipes", "examples/abi", "cli"]
 exclude = ["target", "out", "web", "examples/external"]

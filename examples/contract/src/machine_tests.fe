@@ -72,8 +72,7 @@ impl EffectfulMachine for RegistryMachine {
         }
     }
 
-    // Same choices as the closure version (kind, then agent), so the two
-    // read each other's case files.
+    // The closure regression supplies the same literal kind/agent choices.
     fn gen_cmd(self, _ src: mut Source, _ model: [bool; 4]) -> RegCmd {
         let kind = src.draw(2)
         let agent = src.draw(3)

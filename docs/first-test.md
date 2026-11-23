@@ -113,5 +113,4 @@ plus `type Env = Evm`, with `new_sut` and `run_sut` declared
 - run: fe test my_project
 ```
 
-A fixed seed makes every run identical, so a red CI run reproduces locally
-with the same command.
+A fixed seed reproduces the generated choices with the same code and configuration. Reproducing the verdict also requires consistent callback behavior and initial state.

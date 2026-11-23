@@ -36,7 +36,7 @@ fn fecheck_finds_and_shrinks_the_buggy_version() {
         Config::new(seed: 1, cases: 1000),
     )
     assert!(report.failed())
-    // The shrinker reduces this failing input to a small, locally minimal one:
+    // The shrinker reduces this failing input to a small counterexample:
     // value 0, n = CAP + 256.
     assert!(report.shrunk[0] == 0 && report.shrunk[1] == CAP + 256)
 }

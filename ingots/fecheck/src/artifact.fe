@@ -6,10 +6,10 @@
 // failure happens. The seed is kept as provenance only; replay never needs
 // it.
 //
-// Format (schema 2): UTF-8 text, one `key value` pair per line, `#` starts a
+// Format (schema 4): UTF-8 text, one `key value` pair per line, `#` starts a
 // comment line. Keys must appear in this order; `op` repeats.
 //
-//     fecheck-case 2
+//     fecheck-case 4
 //     test <name>
 //     target <implementation the failure was found against>
 //     compiler <compiler version>
@@ -17,23 +17,23 @@
 //     seed <u64>
 //     case <u64>
 //     cases <u64>
-//     steps <max> <mean>           (schema 2; the generation settings)
-//     verdict <pass|discard|fail|error> <code>
+//     steps <max> <mean>           (or "steps none" for a property)
+//     verdict <fail|error> <code>
 //     failed-step <u64, or "none">
 //     original-length <u64>
 //     choices <u64> <u64> ...
-//     op <rendered command>        (zero or more)
+//     op <run|skip> "<escaped command>"   (zero or more)
 //     violation <one-line explanation>
 //     end
 //
 // Schema 1 files (FeCheck 0.1.0) have no `steps` line. They are still
 // read, with `has_steps` false, and replayed with the settings the 0.1.0 CLI
-// always used (40 operations, mean 12); see `case_steps`.
+// uses by default (40 operations, mean 12); see `case_steps`.
 //
 // The parser treats a case file as untrusted input: every line is length
 // checked, numbers must fit in a u64, the choice count is bounded, unknown
 // or out-of-order keys are rejected, and a truncated file (no `end`) is
-// rejected, so a damaged file can never replay as a pass.
+// rejected. Replay separately validates the recording against the target.
 
 use core::{MemBuffer, MemSpan, MemVec}
 use core::text::parse_uint

@@ -62,11 +62,11 @@ FeCheck showed it.
 | | Hand-written | FeCheck |
 |---|---|---|
 | Found the stale-cache bug | no (5 of 5 pass on the buggy contract) | yes, case 78 of seed 12345 |
-| Sequences checked per run | 5, fixed | 300 random sequences of up to 30 transactions |
-| Failure report | the assert that failed | the shortest sequence, with expected and actual per step |
+| Sequences checked per run | 5, fixed | 78 generated sequences before stopping at the failure (configured for up to 300 passing cases) |
+| Failure report | the assert that failed | the shrunk sequence, with expected and actual per step |
 | Reproduce | rerun the test | the same seed, or the 12-choice case as a regression test |
 | Code | about 65 lines | about 130 lines for the machine, plus a few for the test |
-| A new command (say, `pause`) | new tests for each interaction you think of | one enum variant, one model rule; every interleaving is generated |
+| A new command (say, `pause`) | new tests for each interaction you think of | one enum variant, one model rule; the generator samples sequences containing the new command |
 
 ## Where hand-written tests still win
 

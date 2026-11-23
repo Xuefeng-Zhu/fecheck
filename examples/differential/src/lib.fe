@@ -1,8 +1,8 @@
 // Demo D: differential testing of Fe's own arithmetic.
 //
 // Every property here checks code we did not write (Fe's core library and
-// the compiler's lowering of integer operators) against an independent
-// reference written only from u256 add, sub, compare and bitwise ops. The
+// the compiler's lowering of integer operators) against a Fe reference
+// compiled on the same backend. The
 // same properties run under `fe test` (Sonatina EVM) and
 // `fe test --backend native`, so a disagreement on either backend fails.
 

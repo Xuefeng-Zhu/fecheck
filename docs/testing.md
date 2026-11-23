@@ -1,14 +1,8 @@
 # Testing
 
-EVM results for the core and Demos A to C come from a clean clone of commit
-`5ede679`, run with `fe 26.6.0 (5b3f96a)` on 2026-11-19 (PST); native results
-and Demo D come from GitHub Actions CI on 2026-11-22 (see the note under
-Results). Raw logs:
-[evidence/test-run.txt](evidence/test-run.txt),
-[evidence/cli-checks.txt](evidence/cli-checks.txt),
-[evidence/contract-demo.txt](evidence/contract-demo.txt). The 0.1.0 bugs
-these changes fix are reproduced against the old binary in
-[evidence/before-fix-0.1.0.txt](evidence/before-fix-0.1.0.txt).
+The reviewed submission at `4bb3eb4` passed 152 EVM suite tests and 44 native CLI checks. Its x86-64 job also checked byte-identical case generation and both deployed contract replays. [Submission CI job](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45129083528/job/137540167209)
+
+The checked-in [EVM test log](evidence/test-run.txt), [CLI log](evidence/cli-checks.txt) and [Demo C log](evidence/contract-demo.txt) are historical runs. The [native timing log](evidence/ci-run-native-to-evm.txt) records 507 ms at `c8acf71`. The submission job measured 495 ms for the same one-million-case workload.
 
 ## How to run
 
@@ -26,7 +20,7 @@ fe test examples/recipes          # eight property patterns (docs/recipes.md)
 for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/abi examples/external cli; do fe fmt --check "$d"; done
 ```
 
-## Results
+## Reviewed submission results (`4bb3eb4`)
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|
@@ -41,20 +35,10 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 | `examples/recipes` (eight property patterns) | 10 passed | 10 passed (CI) |
 | `examples/external` (copied outside the repo) | 5 passed (CI) | |
 | `scripts/contract-demo.sh` | shrunk case fails on Cached, passes on Fixed | |
-| `scripts/cli-checks.sh` (native CLI, built from the clone) | | 41 of 41 checks passed |
+| `scripts/cli-checks.sh` (native CLI, built from the clone) | | 44 checks passed |
 | `fe fmt --check` (all eleven ingots) | clean | |
 
-Native results come from GitHub Actions (`ubuntu-latest`, x86-64), which runs
-`./scripts/test.sh` on every push. Run
-[45103740959](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45103740959)
-on commit `caa2a56` passed every step: format check, all EVM and native
-suites, the external ingot, Demo C and 41 of 41 CLI checks. The raw log is in
-`docs/evidence/ci-run-caa2a56.txt`. Demo D was added after that run; its
-results come from run
-[45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)
-(`docs/evidence/ci-run-differential.txt`). The development host was AArch64 Linux,
-where Fe 26.6 has no native backend; there the CLI was built with an x86-64 Fe
-under qemu-user and the native `fe test` suites were left to CI.
+The table describes the reviewed SHA. The current branch adds regressions for final choice confirmation, artifact integrity, classification and CLI output. Run the commands above to measure the revision in your checkout. AArch64 Linux supports the EVM suites. Native CLI integration runs on supported hosts.
 
 ## What the core tests cover (`ingots/fecheck/src/tests_*.fe`)
 
@@ -76,7 +60,7 @@ under qemu-user and the native `fe test` suites were left to CI.
   precondition fails consistently, records traces.
 * **Artifacts and replay**: encode/decode round trip, rejection of
   truncated files, unsupported schema, out-of-order keys, bad and overflowing
-  numbers, bad verdicts, junk choices, data after `end`, too many choices; replay outcomes
+  numbers, bad verdicts, junk choices, non-comment content after `end`, too many choices; replay outcomes
   `Reproduced`, `NoLongerFails`, `DifferentFailure`, `Drift`, and an `Error`
   verdict is never replayed as success.
 
@@ -104,7 +88,9 @@ a test asserting that the buggy implementation **is** caught
 
 ## CLI checks (`scripts/cli-checks.sh`)
 
-41 checks. Exit codes for usage errors and invalid settings (2: no
+With Python and the Fe compiler available, the current CLI script has 54 checks. It covers JSON write errors, equivalent output paths, preservation of the input, maximum case-index formatting, and an emitted test run against a precondition that skips every command. The native CLI unit test also exercises the exit codes for GaveUp and Unstable.
+
+Other CLI checks cover exit codes for usage errors and invalid settings (2: no
 arguments, unknown command or test, bad `--seed`, `--cases 0`, the largest
 `--cases`, `--steps 0`, `--steps 1001`), property failures (1), passing fixed
 targets (0), reproduced replays (0), fixed replays (3), different failures

@@ -19,16 +19,14 @@ original values.
 | `return_values` | `returns (bytes)` and `returns (uint256)` | the 0x20 offset word for a single dynamic return, none for a static one; `decode_output` back |
 
 Values are edge-biased: 0, 1, the maximum and one below it, the top bit
-alone, MIN and MIN + 1 for signed types, and random words cut to width.
+alone and random words cut to width. Int72, Int136 and Int248 use sign-extended i64 samples, so their own width extrema are outside the sampled range. Several properties compare selected words and round-trip values. The uint tuple, dynamic bytes and array tuples, fixed array and static return also check total encoded length.
 
 ## Result
 
 **No bug found.** 2,000 cases per property (18,000 in total) pass on the
 Sonatina EVM backend and natively in CI.
 
-**Can the check fail?** A mutation check that changes two references (the
-sign extension of negative values, and the zero padding of `bytes` data) makes
-five of the nine properties fail at once.
+During development, changing the negative sign-extension and byte-padding references was reported to make five of the nine properties fail. The checked-in suite runs the original references. There is no automated reproduction of that mutation experiment.
 
 ## Not covered
 

@@ -12,7 +12,7 @@
 //   value or command sequence, independent of the PRNG.
 // * Generic shrinking: the shrinker only ever edits the list of integers
 //   (deleting runs, lowering values), so no generator needs its own shrinker
-//   and every shrunk case is still a value the generator could produce.
+//   and candidates are evaluated by the generator itself.
 // * Portable artifacts: a failure is saved as plain integers.
 //
 // A replayed choice larger than the bound of the draw that reads it is

@@ -1,6 +1,6 @@
 // Demo E as an `EffectfulMachine`. Same model, same commands and the same
-// choice encoding as the closure in tests.fe, so the two read each other's
-// cases; here the engine owns the loop, the preconditions, the postcondition
+// choice encoding as the closure in tests.fe. Here the engine owns the
+// loop, the preconditions, the postcondition
 // (each transaction's return value) and the trace.
 
 use core::MemBuffer

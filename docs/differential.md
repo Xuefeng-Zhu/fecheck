@@ -4,16 +4,7 @@ Demos A to C find bugs that were planted for them. Demo D points FeCheck at
 code this project did not write: Fe 26.6's core library (`core::num`) and the
 compiler's lowering of integer operators, on both backends.
 
-Each property draws inputs from FeCheck generators, computes a result with
-the Fe operation under test, and compares it with an independent reference
-written in Fe only from u256 addition, subtraction, comparison, shifts and
-bitwise operations. The reference never uses the operation it checks: u256
-`/` and `%` are checked against bit-by-bit long division, u256 `*` against
-shift-and-add, `gcd` (core uses Euclid) against Stein's binary gcd, and so on.
-The same properties run under `fe test` (Sonatina EVM) and
-`fe test --backend native`. Because both backends are held to the same
-reference, a backend that diverges from the other fails the suite, and
-FeCheck shrinks the input that shows it.
+Each property draws inputs and compares the Fe operation with a Fe reference on the same backend. Examples include bit-by-bit long division for u256 division and shift-and-add for multiplication. Each backend compiles both sides. A mismatch within a backend fails the property and FeCheck tries to shrink the input. Shared errors in the operation and reference can go undetected, and these tests do not compare raw outputs across backends.
 
 Inputs are edge-biased: small values, powers of two, one below a power of
 two, values near the maximum, and full random words. Shift amounts run past
@@ -21,17 +12,13 @@ the type's width (up to 300 bits, or 255 for `u8`), because that is where
 EVM (`SHL` yields 0) and native instruction sets (which mask the count)
 naturally disagree.
 
-**Who checks the references?** Two things. Each reference is built from
-different primitives than the operation it checks, so a shared bug would have
-to appear twice in unrelated code. And a mutation check shows the suite can
-fail: changing one reference (the `u8` shift mask from `0xff` to `0x7f`) makes
-`shl_u8_agrees` fail at once.
+A development mutation of the `u8` reference mask from `0xff` to `0x7f` made `shl_u8_agrees` fail.
 
 ## Result
 
-**No divergence and no wrong result found.** As of commit `5032ecb` (CI run [45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)):
+**The tested operations agreed with their references on the sampled inputs.** As of commit `5032ecb` (CI run [45105951179](https://github.com/Xuefeng-Zhu/fecheck/actions/runs/45105951179)):
 
-| Run | Backend | Properties | Generated cases |
+| Run | Backend | Properties | Configured passing cases |
 |---|---|---|---|
 | `examples/differential` | Sonatina EVM | 29 | 110,000 |
 | `examples/differential` | native (x86-64, CI) | 29 | 110,000 |
@@ -75,7 +62,7 @@ compiler and the core library.
 | `downcast_u256_matches`, `downcast_i256_matches` | `downcast`, `downcast_saturate`, `downcast_truncate` to u8 and i8 | range checks on the 256-bit word |
 
 Inputs that would panic by design (division by zero, `MIN / -1`) are
-skipped, since a native panic cannot be caught in Fe 26.6.
+discarded. The runner counts passing cases toward its target, so generated attempts can exceed the configured totals.
 
 ## Running it
 
