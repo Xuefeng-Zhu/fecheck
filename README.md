@@ -13,6 +13,27 @@ backends. A small native Fe CLI adds `run`, `replay` and `demo` commands.
 Built for the [Fe Builders Challenge 2026](https://fe-lang.org/contest/) with
 **Fe 26.6.0**.
 
+## What's new here
+
+FeCheck isn't just Hypothesis ported to Fe. Three properties of the design
+come from Fe itself:
+
+* **Determinism the compiler checks.** In Hypothesis, proptest, fast-check
+  and Foundry, determinism is a convention: a generator can read the clock or
+  call the host's random number generator, and you find out when a failure
+  won't reproduce. In FeCheck, `Source`, the generators, the shrinker and the
+  case parser declare no effects, and Fe has no ambient I/O, so a generator
+  that tries to read a file doesn't compile. The only effects in a run are the
+  ones the test declares in its own signature.
+* **One engine, two worlds.** The same `check` and the same shrinker drive a
+  pure ring buffer, native code and a deployed EVM contract. `check` declares
+  `uses F::E`, so it forwards whatever effects the test holds (`mut Evm`, a
+  ledger, nothing) without knowing what they are.
+* **Counterexamples that mean the same thing on both backends.** A `.case`
+  file is plain text, written and parsed by pure Fe that runs (with its
+  tests) on Sonatina and native alike. Replay reads the recorded choices, not
+  a seed, so it doesn't depend on either backend's integer behaviour.
+
 ## The headline: a bug in a deployed EVM contract, found and minimized
 
 `CachedRegistry` ([examples/contract/src/lib.fe](examples/contract/src/lib.fe))
