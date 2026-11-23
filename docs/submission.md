@@ -41,7 +41,7 @@ fe test examples/differential                   # Demo D on the EVM
 fe test --backend native examples/differential  # Demo D native
 fe test examples/erc20       # Demo E: Fe's ERC-20 fixture vs an ERC-20 model
 fe test examples/abi         # Demo F: Fe's Solidity ABI encoder/decoder vs the spec
-./scripts/test.sh            # all suites, external ingot, CLI build, CLI checks
+./scripts/test.sh            # all suites, external ingot, CLI build, CLI checks (SKIP_NATIVE=1 on AArch64 Linux)
 ./out/fecheck demo           # Demo A and B end to end
 ```
 

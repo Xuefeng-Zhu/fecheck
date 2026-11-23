@@ -126,6 +126,7 @@ uses F::E
         var start: usize = 0
         while start + size <= s.best.len() {
             if s.out_of_budget() {
+                s.stats.budget_exhausted = true
                 return improved
             }
             let candidate = without_run(s.best, start, size)
@@ -149,6 +150,7 @@ uses F::E
     var index: usize = 0
     while index < s.best.len() {
         if s.out_of_budget() {
+            s.stats.budget_exhausted = true
             return improved
         }
         let current = s.best[index]
@@ -176,6 +178,9 @@ uses F::E
                         lo = mid
                     }
                 }
+                if lo + 1 < hi && s.out_of_budget() {
+                    s.stats.budget_exhausted = true
+                }
             }
         }
         index += 1
@@ -191,6 +196,7 @@ uses F::E
     var index: usize = 0
     while index + 1 < s.best.len() {
         if s.out_of_budget() {
+            s.stats.budget_exhausted = true
             return improved
         }
         let a = s.best[index]
@@ -239,8 +245,13 @@ uses F::E
             progress = true
         }
     }
-    if s.out_of_budget() {
+    // The last round still made progress, so another round was cut short.
+    if progress && s.out_of_budget() {
         s.stats.budget_exhausted = true
+    }
+    // A zero budget means shrinking was disabled, not exhausted.
+    if s.budget == 0 {
+        s.stats.budget_exhausted = false
     }
     ShrinkResult {
         original: copy_choices(choices),

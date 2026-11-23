@@ -221,6 +221,37 @@ fn read_command(_ text: MemSpan) -> Option<MemBuffer> {
     Option::Some(cmd)
 }
 
+/// Writes a single-line text field. The format is line-based, so a newline
+/// or carriage return inside the value (for example a multi-line
+/// `describe_failure`) is written as a space instead of splitting the record.
+/// Leading and trailing whitespace is dropped because `decode` trims lines,
+/// so the written record re-encodes byte for byte.
+fn write_text_line(_ out: mut MemBuffer, _ text: MemSpan) {
+    var start: usize = 0
+    var end = text.len()
+    while start < end && is_space(text[start]) {
+        start += 1
+    }
+    while end > start && is_space(text[end - 1]) {
+        end -= 1
+    }
+    var i = start
+    while i < end {
+        let b = text[i]
+        if b == 10 || b == 13 {
+            out.push(b' ')
+        } else {
+            out.push(b)
+        }
+        i += 1
+    }
+    out.push(10)
+}
+
+fn is_space(_ b: u8) -> bool {
+    b == b' ' || b == 9 || b == 10 || b == 13
+}
+
 /// Re-encode using the recorded schema and producer.
 pub fn encode(_ case: Case) -> MemBuffer {
     var out = MemBuffer::new(0)
@@ -229,10 +260,14 @@ pub fn encode(_ case: Case) -> MemBuffer {
         "# FeCheck regression case. Replay with: fecheck replay <this file>",
     )
     writeln!(mut out, "fecheck-case ", case.schema)
-    writeln!(mut out, "test ", case.test)
-    writeln!(mut out, "target ", case.target)
-    writeln!(mut out, "compiler ", case.compiler)
-    writeln!(mut out, "fecheck ", case.producer)
+    write!(mut out, "test ")
+    write_text_line(mut out, case.test.span())
+    write!(mut out, "target ")
+    write_text_line(mut out, case.target.span())
+    write!(mut out, "compiler ")
+    write_text_line(mut out, case.compiler.span())
+    write!(mut out, "fecheck ")
+    write_text_line(mut out, case.producer.span())
     writeln!(mut out, "seed ", case.seed)
     writeln!(mut out, "case ", case.case_index)
     writeln!(mut out, "cases ", case.cases)
@@ -274,7 +309,8 @@ pub fn encode(_ case: Case) -> MemBuffer {
         }
         i += 1
     }
-    writeln!(mut out, "violation ", case.violation)
+    write!(mut out, "violation ")
+    write_text_line(mut out, case.violation.span())
     writeln!(mut out, "end")
     out
 }

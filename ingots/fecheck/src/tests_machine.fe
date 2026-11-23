@@ -257,6 +257,16 @@ fn case_round_trips() {
 }
 
 #[test]
+fn multi_line_violation_stays_one_record() {
+    var case = found_case(buggy())
+    case.violation = format!("line one\nline two\r\n")
+    let text = encode(case)
+    let back = parse(text)
+    assert!(back.violation.len() > 0)
+    assert!(encode(back) == text)
+}
+
+#[test]
 fn malformed_cases_are_rejected() {
     assert!(parse_fails(""))
     assert!(parse_fails("hello world\n"))

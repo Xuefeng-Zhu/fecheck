@@ -24,7 +24,7 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 
 | Suite | Sonatina (EVM) | Native |
 |---|---|---|
-| `ingots/fecheck` (core) | 87 passed, 0 failed | 87 passed, 0 failed (CI) |
+| `ingots/fecheck` (core) | 88 passed, 0 failed | 88 passed, 0 failed (CI) |
 | `examples/permissions` (Demo A) | 5 passed | 5 passed (CI) |
 | `examples/queue` (Demo B) | 5 passed | 5 passed (CI) |
 | `examples/contract` (Demo C: closure, `EffectfulMachine`, hand-written comparison, native case replayed on the `fe test` EVM) | 17 passed | n/a (EVM contract) |

@@ -507,7 +507,15 @@ uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
     }
     var same = resolved_path(case_path) == resolved_path(json_path)
     if !same && fs.metadata(format!(case_path)).is_ok() && fs.metadata(format!(json_path)).is_ok() {
-        let cmd = Command::new("/bin/test").arg(case_path).arg("-ef").arg(json_path)
+        // Absolute canonical paths can't be read as test(1) flags or operators.
+        // /bin/test is missing on some non-usrmerge distros; fall back to /usr/bin.
+        let case_full = resolved_path(case_path)
+        let json_full = resolved_path(json_path)
+        let cmd = if fs.metadata(format!("/bin/test")).is_ok() {
+            Command::new("/bin/test").arg(case_full.span()).arg("-ef").arg(json_full.span())
+        } else {
+            Command::new("/usr/bin/test").arg(case_full.span()).arg("-ef").arg(json_full.span())
+        }
         match proc.output(cmd) {
             Result::Ok(result) => {
                 match result.status {

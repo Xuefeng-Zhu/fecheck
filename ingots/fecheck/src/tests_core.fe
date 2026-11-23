@@ -407,6 +407,7 @@ fn shrinking_disabled_keeps_original() {
     )
     assert!(report.failed())
     assert!(report.shrink.attempts == 0)
+    assert!(!report.shrink.budget_exhausted)
     assert!(same_choices(report.original, report.shrunk))
 }
 

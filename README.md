@@ -241,6 +241,7 @@ those tools.
 | Demo C: the permission bug in a deployed **EVM contract**, end to end with `scripts/contract-demo.sh` | done |
 | Demo D: differential properties for Fe's core arithmetic on both backends (`examples/differential`, native deep run in `examples/differential_deep`) | done, sampled results agreed with their references |
 | Demo E: model-based test of the Fe test suite's ERC-20 (CoolCoin) with three holder contracts | done, 1,000 sequences pass; a one-line mutant is caught |
+| Demo F: Fe's Solidity ABI encoder/decoder checked against the ABI spec (`examples/abi`) | done, 18,000 cases pass |
 | A stand-alone ingot using FeCheck as a dependency, tested from outside the repo | done (`examples/external`, `scripts/external-check.sh`) |
 | Web visualisation | not built (deliberately; see limitations) |
 
@@ -251,7 +252,7 @@ commit, `bae50dc`.
 
 ## Quick start
 
-Requirements: Fe 26.6.0 and python3 (used by two scripts for relative paths
+Requirements: Fe 26.6.0 and python3 (used by the helper scripts for relative paths
 and log decoding). The native CLI needs an x86-64 Linux or AArch64 macOS host
 (a Fe 26.6 native-backend restriction); the `fe test` suites run anywhere Fe
 runs.
@@ -509,7 +510,7 @@ ingots/fecheck/src/         the library (all Fe)
   artifact.fe                 .case format: encoder and strict parser
   replay.fe                   replay and outcome classification
   json.fe                     JSON trace export
-  tests_*.fe                  87 tests
+  tests_*.fe                  88 tests
 examples/permissions/       Demo A (library state machine)
 examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
