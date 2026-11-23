@@ -1,0 +1,128 @@
+use fecheck::{Source, Config, check}
+use ingot::*
+
+fn passes<F: Fn(mut Source) -> fecheck::Verdict>(_ f: F, _ cases: u64) -> bool
+uses F::E
+{
+    check(f, Config::new(seed: 1, cases)).passed()
+}
+
+#[test]
+fn shl_u8_agrees() {
+    assert!(passes(|src: mut Source| shl_u8(mut src), 500))
+}
+
+#[test]
+fn shr_u8_agrees() {
+    assert!(passes(|src: mut Source| shr_u8(mut src), 500))
+}
+
+#[test]
+fn shl_u64_agrees() {
+    assert!(passes(|src: mut Source| shl_u64(mut src), 500))
+}
+
+#[test]
+fn shr_u64_agrees() {
+    assert!(passes(|src: mut Source| shr_u64(mut src), 500))
+}
+
+#[test]
+fn shl_u256_agrees() {
+    assert!(passes(|src: mut Source| shl_u256(mut src), 300))
+}
+
+#[test]
+fn sar_i8_agrees() {
+    assert!(passes(|src: mut Source| sar_i8(mut src), 500))
+}
+
+#[test]
+fn wrapping_u8_agrees() {
+    assert!(passes(|src: mut Source| wrapping_u8(mut src), 500))
+}
+
+#[test]
+fn saturating_u64_agrees() {
+    assert!(passes(|src: mut Source| saturating_u64(mut src), 500))
+}
+
+#[test]
+fn addmod_agrees() {
+    assert!(passes(|src: mut Source| addmod_matches(mut src), 300))
+}
+
+#[test]
+fn mulmod_agrees() {
+    assert!(passes(|src: mut Source| mulmod_matches(mut src), 200))
+}
+
+#[test]
+fn isqrt_agrees() {
+    assert!(passes(|src: mut Source| isqrt_matches(mut src), 300))
+}
+
+#[test]
+fn gcd_agrees() {
+    assert!(passes(|src: mut Source| gcd_matches(mut src), 200))
+}
+
+#[test]
+fn full_mul_agrees() {
+    assert!(passes(|src: mut Source| full_mul_matches(mut src), 300))
+}
+
+#[test]
+fn mul_div_agrees() {
+    assert!(passes(|src: mut Source| mul_div_matches(mut src), 200))
+}
+
+#[test]
+fn div_u256_agrees() {
+    assert!(passes(|src: mut Source| div_u256_matches(mut src), 200))
+}
+
+#[test]
+fn mul_u256_agrees() {
+    assert!(passes(|src: mut Source| mul_u256_matches(mut src), 200))
+}
+
+#[test]
+fn pow_u64_agrees() {
+    assert!(passes(|src: mut Source| pow_u64_matches(mut src), 300))
+}
+
+#[test]
+fn div_i64_agrees() {
+    assert!(passes(|src: mut Source| div_i64_matches(mut src), 500))
+}
+
+#[test]
+fn clz_u256_agrees() {
+    assert!(passes(|src: mut Source| clz_u256_matches(mut src), 300))
+}
+
+#[test]
+fn ctz_u256_agrees() {
+    assert!(passes(|src: mut Source| ctz_u256_matches(mut src), 300))
+}
+
+#[test]
+fn clz_u64_agrees() {
+    assert!(passes(|src: mut Source| clz_u64_matches(mut src), 300))
+}
+
+#[test]
+fn swap_u64_agrees() {
+    assert!(passes(|src: mut Source| swap_u64_matches(mut src), 300))
+}
+
+#[test]
+fn sar_i64_agrees() {
+    assert!(passes(|src: mut Source| sar_i64_matches(mut src), 500))
+}
+
+#[test]
+fn shl_u32_agrees() {
+    assert!(passes(|src: mut Source| shl_u32_matches(mut src), 500))
+}

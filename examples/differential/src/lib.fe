@@ -1,0 +1,574 @@
+// Demo D: differential testing of Fe's own arithmetic.
+//
+// Every property here checks code we did not write (Fe's core library and
+// the compiler's lowering of integer operators) against an independent
+// reference written only from u256 add, sub, compare and bitwise ops. The
+// same properties run under `fe test` (Sonatina EVM) and
+// `fe test --backend native`, so a disagreement on either backend fails.
+
+use core::num::{
+    isqrt,
+    gcd,
+    addmod,
+    mulmod,
+    full_mul,
+    checked_mul_div,
+    leading_zeros,
+    trailing_zeros,
+    swap_bytes,
+}
+use fecheck::{Source, Verdict, Gen, ensure, int_in}
+
+pub const U256_MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+pub const U64_MAX: u64 = 0xffffffffffffffff
+
+// Failure codes, one per family.
+pub const SHL_U8: u64 = 1
+pub const SHR_U8: u64 = 2
+pub const SHL_U64: u64 = 3
+pub const SHR_U64: u64 = 4
+pub const SAR_I8: u64 = 5
+pub const WRAP_U8: u64 = 6
+pub const ADDMOD: u64 = 7
+pub const MULMOD: u64 = 8
+pub const ISQRT: u64 = 9
+pub const GCD: u64 = 10
+pub const FULL_MUL: u64 = 11
+pub const MUL_DIV: u64 = 12
+pub const SAT_U64: u64 = 13
+pub const SHL_U256: u64 = 14
+pub const DIV_U256: u64 = 15
+pub const MUL_U256: u64 = 16
+pub const POW_U64: u64 = 17
+pub const DIV_I64: u64 = 18
+pub const CLZ_U256: u64 = 19
+pub const CTZ_U256: u64 = 20
+pub const CLZ_U64: u64 = 21
+pub const SWAP_U64: u64 = 22
+pub const SAR_I64: u64 = 23
+pub const SHL_U32: u64 = 24
+
+// ---------------------------------------------------------------- inputs
+
+/// A u256 biased toward the edges: small values, powers of two, one below
+/// a power of two, values near the maximum, and full random words. Smaller
+/// choices give simpler values, so failures shrink toward 0.
+pub fn word(_ src: mut Source) -> u256 {
+    let shape = src.draw(6)
+    if shape == 0 {
+        return src.draw(16) as u256
+    }
+    if shape == 1 {
+        return (1 as u256) << (src.draw(255) as u256)
+    }
+    if shape == 2 {
+        return ((1 as u256) << (src.draw(255) as u256)) - 1
+    }
+    if shape == 3 {
+        return U256_MAX - (src.draw(16) as u256)
+    }
+    let a = src.draw(U64_MAX) as u256
+    let b = src.draw(U64_MAX) as u256
+    let c = src.draw(U64_MAX) as u256
+    let d = src.draw(U64_MAX) as u256
+    (a << 192) | (b << 128) | (c << 64) | d
+}
+
+/// A u64 biased the same way.
+pub fn word64(_ src: mut Source) -> u64 {
+    let shape = src.draw(4)
+    if shape == 0 {
+        return src.draw(16)
+    }
+    if shape == 1 {
+        return (1 as u64) << src.draw(63)
+    }
+    if shape == 2 {
+        return U64_MAX - src.draw(16)
+    }
+    src.draw(U64_MAX)
+}
+
+/// Narrowing helpers for values already known to fit (checked: a value
+/// that does not fit is a test bug and panics).
+fn to_u8(_ x: u64) -> u8 {
+    let r: Option<u8> = x.downcast()
+    r.unwrap()
+}
+fn to_u64(_ x: u256) -> u64 {
+    let r: Option<u64> = x.downcast()
+    r.unwrap()
+}
+fn to_u32(_ x: u64) -> u32 {
+    let r: Option<u32> = x.downcast()
+    r.unwrap()
+}
+fn to_i8(_ x: i64) -> i8 {
+    let r: Option<i8> = x.downcast()
+    r.unwrap()
+}
+
+// ---------------------------------------------------------- references
+
+/// (a + b) mod m without overflow, for a, b < m.
+fn add_reduced(_ a: u256, _ b: u256, _ m: u256) -> u256 {
+    if a >= m - b { a - (m - b) } else { a + b }
+}
+
+/// addmod by definition, using only subtraction and comparison.
+pub fn ref_addmod(_ a: u256, _ b: u256, _ m: u256) -> u256 {
+    if m == 0 { return 0 }
+    add_reduced(a % m, b % m, m)
+}
+
+/// mulmod by double-and-add over the bits of b.
+pub fn ref_mulmod(_ a: u256, _ b: u256, _ m: u256) -> u256 {
+    if m == 0 { return 0 }
+    let x = a % m
+    var r: u256 = 0
+    var i: u256 = 256
+    while i > 0 {
+        i -= 1
+        r = add_reduced(r, r, m)
+        if (b >> i) & 1 == 1 {
+            r = add_reduced(r, x, m)
+        }
+    }
+    r
+}
+
+/// The 512-bit product (high, low) by schoolbook multiplication on 128-bit
+/// halves, each partial product fitting in a u256.
+pub fn ref_full_mul(_ a: u256, _ b: u256) -> (u256, u256) {
+    let mask: u256 = (1 << 128) - 1
+    let a0 = a & mask
+    let a1 = a >> 128
+    let b0 = b & mask
+    let b1 = b >> 128
+    let p00 = a0 * b0
+    let p01 = a0 * b1
+    let p10 = a1 * b0
+    let p11 = a1 * b1
+    // middle = p01 + p10 + (p00 >> 128), which may need 258 bits: split it.
+    let mid_lo = (p01 & mask) + (p10 & mask) + (p00 >> 128)
+    let mid_hi = (p01 >> 128) + (p10 >> 128) + (mid_lo >> 128)
+    let low = ((mid_lo & mask) << 128) | (p00 & mask)
+    let high = p11 + mid_hi
+    (high, low)
+}
+
+/// floor(a * b / d) by restoring long division of the 512-bit product, or
+/// None when d is 0 or the quotient does not fit in 256 bits.
+pub fn ref_mul_div(_ a: u256, _ b: u256, _ d: u256) -> Option<u256> {
+    if d == 0 {
+        return Option::None
+    }
+    let (high, low) = ref_full_mul(a, b)
+    if high >= d {
+        return Option::None
+    }
+    // Remainder starts as high (< d); shift in the 256 bits of low.
+    var r = high
+    var q: u256 = 0
+    var i: u256 = 256
+    while i > 0 {
+        i -= 1
+        let bit = (low >> i) & 1
+        // r < d, so 2r + bit < 2d; detect the carry out of bit 255.
+        let carry = r >> 255
+        r = (r << 1) | bit
+        q = q << 1
+        if carry == 1 || r >= d {
+            // With the carry the true remainder is r + 2^256, and the
+            // difference fits, so wrapping subtraction gives it exactly.
+            r = r.wrapping_sub(d)
+            q = q | 1
+        }
+    }
+    Option::Some(q)
+}
+
+/// Stein's binary gcd, sharing no code with core's Euclid.
+pub fn ref_gcd(_ a: u256, _ b: u256) -> u256 {
+    if a == 0 { return b }
+    if b == 0 { return a }
+    var x = a
+    var y = b
+    var shift: u256 = 0
+    while ((x | y) & 1) == 0 {
+        x = x >> 1
+        y = y >> 1
+        shift += 1
+    }
+    while (x & 1) == 0 {
+        x = x >> 1
+    }
+    while y != 0 {
+        while (y & 1) == 0 {
+            y = y >> 1
+        }
+        if x > y {
+            let t = x
+            x = y
+            y = t
+        }
+        y = y - x
+    }
+    x << shift
+}
+
+// ---------------------------------------------------------- properties
+
+/// `u8 << s` equals (x * 2^s) mod 2^8 for every s, so 0 once s >= 8.
+pub fn shl_u8(_ src: mut Source) -> Verdict {
+    let x = src.draw(255)
+    let s = src.draw(255)
+    let got = (to_u8(x) << to_u8(s)) as u64
+    let want = if s >= 8 { 0 } else { (x << s) & 0xff }
+    ensure(got == want, SHL_U8)
+}
+
+/// `u8 >> s` equals floor(x / 2^s), so 0 once s >= 8.
+pub fn shr_u8(_ src: mut Source) -> Verdict {
+    let x = src.draw(255)
+    let s = src.draw(255)
+    let got = (to_u8(x) >> to_u8(s)) as u64
+    let want = if s >= 8 { 0 } else { x >> s }
+    ensure(got == want, SHR_U8)
+}
+
+/// `u64 << s` for s up to 300, computed in u256.
+pub fn shl_u64(_ src: mut Source) -> Verdict {
+    let x = word64(mut src)
+    let s = src.draw(300)
+    let got = x << s
+    let want = if s >= 64 {
+        0
+    } else {
+        to_u64(((x as u256) << (s as u256)) & (U64_MAX as u256))
+    }
+    ensure(got == want, SHL_U64)
+}
+
+/// `u64 >> s` for s up to 300.
+pub fn shr_u64(_ src: mut Source) -> Verdict {
+    let x = word64(mut src)
+    let s = src.draw(300)
+    let got = x >> s
+    let want = if s >= 64 {
+        0
+    } else {
+        to_u64((x as u256) >> (s as u256))
+    }
+    ensure(got == want, SHR_U64)
+}
+
+/// `u256 << s` for s up to 300: 0 once s >= 256.
+pub fn shl_u256(_ src: mut Source) -> Verdict {
+    let x = word(mut src)
+    let s = src.draw(300) as u256
+    let got = x << s
+    var want = x
+    var i: u256 = 0
+    while i < s && want != 0 {
+        want = (want & ((1 << 255) - 1)) * 2
+        i += 1
+    }
+    ensure(got == want, SHL_U256)
+}
+
+/// Arithmetic `i8 >> s` rounds toward negative infinity, so it ends at 0
+/// or -1 once s >= 8.
+pub fn sar_i8(_ src: mut Source) -> Verdict {
+    let xv0 = int_in(-128, 127).generate(mut src)
+    let si = int_in(0, 127).generate(mut src)
+    let x: i8 = to_i8(xv0)
+    let got = (x >> to_i8(si)) as i64
+    let xv = x as i64
+    var want = xv
+    var i: i64 = 0
+    while i < si && i < 9 {
+        // floor division by 2
+        want = if want < 0 { (want - 1) / 2 } else { want / 2 }
+        i += 1
+    }
+    ensure(got == want, SAR_I8)
+}
+
+/// wrapping add, sub and mul on u8 agree with arithmetic mod 256.
+pub fn wrapping_u8(_ src: mut Source) -> Verdict {
+    let a = src.draw(255)
+    let b = src.draw(255)
+    let op = src.draw(2)
+    let x = to_u8(a)
+    let y = to_u8(b)
+    let got: u64 = if op == 0 {
+        x.wrapping_add(y) as u64
+    } else if op == 1 {
+        x.wrapping_sub(y) as u64
+    } else {
+        x.wrapping_mul(y) as u64
+    }
+    let want: u64 = if op == 0 {
+        (a + b) & 0xff
+    } else if op == 1 {
+        (a + 256 - b) & 0xff
+    } else {
+        (a * b) & 0xff
+    }
+    ensure(got == want, WRAP_U8)
+}
+
+/// saturating add, sub and mul on u64 clamp to the u64 range.
+pub fn saturating_u64(_ src: mut Source) -> Verdict {
+    let a = word64(mut src)
+    let b = word64(mut src)
+    let op = src.draw(2)
+    let wa = a as u256
+    let wb = b as u256
+    let m = U64_MAX as u256
+    let got: u64 = if op == 0 {
+        a.saturating_add(b)
+    } else if op == 1 {
+        a.saturating_sub(b)
+    } else {
+        a.saturating_mul(b)
+    }
+    let exact: u256 = if op == 0 {
+        wa + wb
+    } else if op == 1 {
+        if wa > wb { wa - wb } else { 0 }
+    } else {
+        wa * wb
+    }
+    let want: u64 = if exact > m { U64_MAX } else { to_u64(exact) }
+    ensure(got == want, SAT_U64)
+}
+
+pub fn addmod_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    let m = word(mut src)
+    ensure(addmod(a, b, m) == ref_addmod(a, b, m), ADDMOD)
+}
+
+pub fn mulmod_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    let m = word(mut src)
+    ensure(mulmod(a, b, m) == ref_mulmod(a, b, m), MULMOD)
+}
+
+/// isqrt(x) is the largest z with z * z <= x.
+pub fn isqrt_matches(_ src: mut Source) -> Verdict {
+    let x = word(mut src)
+    let z = isqrt(x)
+    let root_max: u256 = (1 << 128) - 1
+    if z > root_max {
+        return ensure(false, ISQRT)
+    }
+    let below = z * z <= x
+    let above = if z == root_max {
+        true
+    } else {
+        (z + 1) * (z + 1) > x
+    }
+    ensure(below && above, ISQRT)
+}
+
+pub fn gcd_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    ensure(gcd(a, b) == ref_gcd(a, b), GCD)
+}
+
+pub fn full_mul_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    let (h, l) = full_mul(a, b)
+    let (rh, rl) = ref_full_mul(a, b)
+    ensure(h == rh && l == rl, FULL_MUL)
+}
+
+pub fn mul_div_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    let d = word(mut src)
+    let got = checked_mul_div(a, b, d)
+    let want = ref_mul_div(a, b, d)
+    let same = match got {
+        Option::Some(g) => match want {
+            Option::Some(w) => g == w,
+            Option::None => false,
+        },
+        Option::None => want.is_none(),
+    }
+    ensure(same, MUL_DIV)
+}
+
+/// Quotient and remainder by restoring division over the bits of a, using
+/// only shifts, comparison and subtraction (no u256 `/` or `%`).
+pub fn ref_divmod(_ a: u256, _ d: u256) -> (u256, u256) {
+    var q: u256 = 0
+    var r: u256 = 0
+    var i: u256 = 256
+    while i > 0 {
+        i -= 1
+        let carry = r >> 255
+        r = (r << 1) | ((a >> i) & 1)
+        q = q << 1
+        if carry == 1 || r >= d {
+            r = r.wrapping_sub(d)
+            q = q | 1
+        }
+    }
+    (q, r)
+}
+
+/// Wrapping u256 product by shift-and-add (no u256 `*`).
+pub fn ref_wrapping_mul(_ a: u256, _ b: u256) -> u256 {
+    var acc: u256 = 0
+    var i: u256 = 0
+    while i < 256 {
+        if (b >> i) & 1 == 1 {
+            acc = acc.wrapping_add(a << i)
+        }
+        i += 1
+    }
+    acc
+}
+
+/// u256 `/` and `%` agree with long division, for every nonzero divisor.
+pub fn div_u256_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let d0 = word(mut src)
+    let d = if d0 == 0 { 1 } else { d0 }
+    let (q, r) = ref_divmod(a, d)
+    ensure(a / d == q && a % d == r, DIV_U256)
+}
+
+/// u256 wrapping multiplication agrees with shift-and-add.
+pub fn mul_u256_matches(_ src: mut Source) -> Verdict {
+    let a = word(mut src)
+    let b = word(mut src)
+    ensure(a.wrapping_mul(b) == ref_wrapping_mul(a, b), MUL_U256)
+}
+
+/// u64 wrapping_pow agrees with repeated multiplication mod 2^64, the
+/// product reduced in u256 each step.
+pub fn pow_u64_matches(_ src: mut Source) -> Verdict {
+    let x = word64(mut src)
+    let e = src.draw(70)
+    let got = x.wrapping_pow(e)
+    let m = U64_MAX as u256
+    var want: u256 = 1
+    var i: u64 = 0
+    while i < e {
+        want = (want * (x as u256)) & m
+        i += 1
+    }
+    ensure((got as u256) == want, POW_U64)
+}
+
+/// i64 `/` truncates toward zero and `%` takes the dividend's sign,
+/// checked against sign-magnitude arithmetic on u64. Skips d == 0 and the
+/// one overflowing quotient, MIN / -1.
+pub fn div_i64_matches(_ src: mut Source) -> Verdict {
+    let a = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
+    let d = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
+    if d == 0 || (d == -1 && a == -9223372036854775807 - 1) {
+        return ensure(true, DIV_I64)
+    }
+    let ua: u64 = a.unsigned_abs()
+    let ud: u64 = d.unsigned_abs()
+    let uq = ua / ud
+    let ur = ua % ud
+    let neg_q = (a < 0) != (d < 0)
+    let got_q = a / d
+    let got_r = a % d
+    let ok_q = if neg_q {
+        got_q.unsigned_abs() == uq && (got_q <= 0)
+    } else {
+        got_q.unsigned_abs() == uq && got_q >= 0
+    }
+    let ok_r = if a < 0 {
+        got_r.unsigned_abs() == ur && got_r <= 0
+    } else {
+        got_r.unsigned_abs() == ur && got_r >= 0
+    }
+    ensure(ok_q && ok_r, DIV_I64)
+}
+
+/// leading_zeros on u256 counts zero bits above the highest set bit.
+pub fn clz_u256_matches(_ src: mut Source) -> Verdict {
+    let x = word(mut src)
+    var n: u256 = 0
+    while n < 256 && ((x >> (255 - n)) & 1) == 0 {
+        n += 1
+    }
+    ensure(leading_zeros(x) == n, CLZ_U256)
+}
+
+/// trailing_zeros on u256 counts zero bits below the lowest set bit.
+pub fn ctz_u256_matches(_ src: mut Source) -> Verdict {
+    let x = word(mut src)
+    var n: u256 = 0
+    while n < 256 && ((x >> n) & 1) == 0 {
+        n += 1
+    }
+    ensure(trailing_zeros(x) == n, CTZ_U256)
+}
+
+/// leading_zeros and trailing_zeros on u64, including 0 (both are 64).
+pub fn clz_u64_matches(_ src: mut Source) -> Verdict {
+    let x = word64(mut src)
+    var lz: u64 = 0
+    while lz < 64 && ((x >> (63 - lz)) & 1) == 0 {
+        lz += 1
+    }
+    var tz: u64 = 0
+    while tz < 64 && ((x >> tz) & 1) == 0 {
+        tz += 1
+    }
+    ensure(leading_zeros(x) == lz && trailing_zeros(x) == tz, CLZ_U64)
+}
+
+/// swap_bytes on u64 reverses the eight bytes.
+pub fn swap_u64_matches(_ src: mut Source) -> Verdict {
+    let x = word64(mut src)
+    var want: u64 = 0
+    var i: u64 = 0
+    while i < 8 {
+        want = (want << 8) | ((x >> (8 * i)) & 0xff)
+        i += 1
+    }
+    ensure(swap_bytes(x) == want, SWAP_U64)
+}
+
+/// Arithmetic `i64 >> s` for s up to 300: floor(x / 2^s), so 0 or -1 once
+/// s >= 64.
+pub fn sar_i64_matches(_ src: mut Source) -> Verdict {
+    let x = int_in(-9223372036854775807 - 1, 9223372036854775807).generate(mut src)
+    let s = int_in(0, 300).generate(mut src)
+    let got = x >> s
+    var want = x
+    var i: i64 = 0
+    while i < s && i < 65 {
+        want = if want < 0 { (want - 1) / 2 } else { want / 2 }
+        i += 1
+    }
+    ensure(got == want, SAR_I64)
+}
+
+/// `u32 << s` for s up to 100: 0 once s >= 32.
+pub fn shl_u32_matches(_ src: mut Source) -> Verdict {
+    let x = src.draw(0xffffffff)
+    let s = src.draw(100)
+    let got = (to_u32(x) << to_u32(s)) as u64
+    let want = if s >= 32 {
+        0
+    } else {
+        to_u64(((x as u256) << (s as u256)) & 0xffffffff)
+    }
+    ensure(got == want, SHL_U32)
+}
