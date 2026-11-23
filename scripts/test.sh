@@ -36,7 +36,7 @@ if [ "${SKIP_NATIVE_TESTS:-0}" = "1" ]; then
     echo "== skipping fe test --backend native (SKIP_NATIVE_TESTS=1)"
 else
     echo "== fe test --backend native"
-    for ingot in ingots/fecheck examples/permissions examples/queue examples/differential; do
+    for ingot in ingots/fecheck examples/permissions examples/queue examples/differential examples/differential_deep; do
         echo "-- $ingot"
         "$FE" test --backend native "$ingot"
     done

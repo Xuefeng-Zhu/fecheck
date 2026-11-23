@@ -1,0 +1,7 @@
+[ingot]
+name = "differential_deep"
+version = "0.1.0"
+
+[dependencies]
+fecheck = "../../ingots/fecheck"
+differential = "../differential"

@@ -47,6 +47,8 @@ pub const CLZ_U64: u64 = 21
 pub const SWAP_U64: u64 = 22
 pub const SAR_I64: u64 = 23
 pub const SHL_U32: u64 = 24
+pub const DIV_I128: u64 = 25
+pub const SHIFT_U128: u64 = 26
 
 // ---------------------------------------------------------------- inputs
 
@@ -571,4 +573,58 @@ pub fn shl_u32_matches(_ src: mut Source) -> Verdict {
         to_u64(((x as u256) << (s as u256)) & 0xffffffff)
     }
     ensure(got == want, SHL_U32)
+}
+
+/// An i128 from two u64 draws, edge-biased through `word64`.
+pub fn word_i128(_ src: mut Source) -> i128 {
+    let hi = word64(mut src) as u256
+    let lo = word64(mut src) as u256
+    let w: u256 = (hi << 64) | lo
+    w.downcast_truncate()
+}
+
+/// i128 `/` and `%` against long division of the magnitudes in u256.
+pub fn div_i128_matches(_ src: mut Source) -> Verdict {
+    let a = word_i128(mut src)
+    let d = word_i128(mut src)
+    let min: i128 = i128::min()
+    if d == 0 || (d == -1 && a == min) {
+        return ensure(true, DIV_I128)
+    }
+    let ua: u128 = a.unsigned_abs()
+    let ud: u128 = d.unsigned_abs()
+    let (uq, ur) = ref_divmod(ua as u256, ud as u256)
+    let got_q = a / d
+    let got_r = a % d
+    let gq: u128 = got_q.unsigned_abs()
+    let gr: u128 = got_r.unsigned_abs()
+    let neg_q = (a < 0) != (d < 0)
+    let sign_q_ok = if neg_q { got_q <= 0 } else { got_q >= 0 }
+    let sign_r_ok = if a < 0 { got_r <= 0 } else { got_r >= 0 }
+    ensure(
+        (gq as u256) == uq && (gr as u256) == ur && sign_q_ok && sign_r_ok,
+        DIV_I128,
+    )
+}
+
+/// u128 `<<` and `>>` for s up to 300, against u256 shifts masked to 128
+/// bits: 0 once s >= 128.
+pub fn shift_u128_matches(_ src: mut Source) -> Verdict {
+    let hi = word64(mut src) as u256
+    let lo = word64(mut src) as u256
+    let w: u256 = (hi << 64) | lo
+    let x: u128 = w.downcast_truncate()
+    let s = src.draw(300)
+    let s128: u128 = s as u128
+    let mask: u256 = (1 << 128) - 1
+    let want_l: u256 = if s >= 128 {
+        0
+    } else {
+        (w << (s as u256)) & mask
+    }
+    let want_r: u256 = if s >= 128 { 0 } else { w >> (s as u256) }
+    ensure(
+        ((x << s128) as u256) == want_l && ((x >> s128) as u256) == want_r,
+        SHIFT_U128,
+    )
 }

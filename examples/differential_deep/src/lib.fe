@@ -1,0 +1,142 @@
+// Demo D at depth, for the native backend only: every differential
+// property at 100 times its `examples/differential` case count, with a
+// different seed. The EVM test runner caps gas per test, so this ingot is
+// run with `fe test --backend native` (CI does; see scripts/test.sh).
+use fecheck::{Source, Config, check}
+use differential::*
+
+fn passes<F: Fn(mut Source) -> fecheck::Verdict>(_ f: F, _ cases: u64) -> bool
+uses F::E
+{
+    check(f, Config::new(seed: 20261124, cases: cases * 100)).passed()
+}
+
+#[test]
+fn deep_shl_u8_agrees() {
+    assert!(passes(|src: mut Source| shl_u8(mut src), 500))
+}
+
+#[test]
+fn deep_shr_u8_agrees() {
+    assert!(passes(|src: mut Source| shr_u8(mut src), 500))
+}
+
+#[test]
+fn deep_shl_u64_agrees() {
+    assert!(passes(|src: mut Source| shl_u64(mut src), 500))
+}
+
+#[test]
+fn deep_shr_u64_agrees() {
+    assert!(passes(|src: mut Source| shr_u64(mut src), 500))
+}
+
+#[test]
+fn deep_shl_u256_agrees() {
+    assert!(passes(|src: mut Source| shl_u256(mut src), 300))
+}
+
+#[test]
+fn deep_sar_i8_agrees() {
+    assert!(passes(|src: mut Source| sar_i8(mut src), 500))
+}
+
+#[test]
+fn deep_wrapping_u8_agrees() {
+    assert!(passes(|src: mut Source| wrapping_u8(mut src), 500))
+}
+
+#[test]
+fn deep_saturating_u64_agrees() {
+    assert!(passes(|src: mut Source| saturating_u64(mut src), 500))
+}
+
+#[test]
+fn deep_addmod_agrees() {
+    assert!(passes(|src: mut Source| addmod_matches(mut src), 300))
+}
+
+#[test]
+fn deep_mulmod_agrees() {
+    assert!(passes(|src: mut Source| mulmod_matches(mut src), 200))
+}
+
+#[test]
+fn deep_isqrt_agrees() {
+    assert!(passes(|src: mut Source| isqrt_matches(mut src), 300))
+}
+
+#[test]
+fn deep_gcd_agrees() {
+    assert!(passes(|src: mut Source| gcd_matches(mut src), 200))
+}
+
+#[test]
+fn deep_full_mul_agrees() {
+    assert!(passes(|src: mut Source| full_mul_matches(mut src), 300))
+}
+
+#[test]
+fn deep_mul_div_agrees() {
+    assert!(passes(|src: mut Source| mul_div_matches(mut src), 200))
+}
+
+#[test]
+fn deep_div_u256_agrees() {
+    assert!(passes(|src: mut Source| div_u256_matches(mut src), 200))
+}
+
+#[test]
+fn deep_mul_u256_agrees() {
+    assert!(passes(|src: mut Source| mul_u256_matches(mut src), 200))
+}
+
+#[test]
+fn deep_pow_u64_agrees() {
+    assert!(passes(|src: mut Source| pow_u64_matches(mut src), 300))
+}
+
+#[test]
+fn deep_div_i64_agrees() {
+    assert!(passes(|src: mut Source| div_i64_matches(mut src), 500))
+}
+
+#[test]
+fn deep_clz_u256_agrees() {
+    assert!(passes(|src: mut Source| clz_u256_matches(mut src), 300))
+}
+
+#[test]
+fn deep_ctz_u256_agrees() {
+    assert!(passes(|src: mut Source| ctz_u256_matches(mut src), 300))
+}
+
+#[test]
+fn deep_clz_u64_agrees() {
+    assert!(passes(|src: mut Source| clz_u64_matches(mut src), 300))
+}
+
+#[test]
+fn deep_swap_u64_agrees() {
+    assert!(passes(|src: mut Source| swap_u64_matches(mut src), 300))
+}
+
+#[test]
+fn deep_sar_i64_agrees() {
+    assert!(passes(|src: mut Source| sar_i64_matches(mut src), 500))
+}
+
+#[test]
+fn deep_shl_u32_agrees() {
+    assert!(passes(|src: mut Source| shl_u32_matches(mut src), 500))
+}
+
+#[test]
+fn deep_div_i128_agrees() {
+    assert!(passes(|src: mut Source| div_i128_matches(mut src), 300))
+}
+
+#[test]
+fn deep_shift_u128_agrees() {
+    assert!(passes(|src: mut Source| shift_u128_matches(mut src), 500))
+}

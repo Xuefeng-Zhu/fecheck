@@ -4,7 +4,7 @@ use ingot::*
 fn passes<F: Fn(mut Source) -> fecheck::Verdict>(_ f: F, _ cases: u64) -> bool
 uses F::E
 {
-    check(f, Config::new(seed: 1, cases)).passed()
+    check(f, Config::new(seed: 1, cases: cases * 10)).passed()
 }
 
 #[test]
@@ -125,4 +125,13 @@ fn sar_i64_agrees() {
 #[test]
 fn shl_u32_agrees() {
     assert!(passes(|src: mut Source| shl_u32_matches(mut src), 500))
+}
+#[test]
+fn div_i128_agrees() {
+    assert!(passes(|src: mut Source| div_i128_matches(mut src), 300))
+}
+
+#[test]
+fn shift_u128_agrees() {
+    assert!(passes(|src: mut Source| shift_u128_matches(mut src), 500))
 }
