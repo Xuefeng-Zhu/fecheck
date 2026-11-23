@@ -107,6 +107,16 @@ an invariant that queries the token after every transaction. For the mutant it
 shrinks to two transactions, an `approve` and a `transferFrom`. The original
 hand-rolled closure stays in `tests.fe`, and the two read each other's cases.
 
+## Fe's Solidity ABI
+
+Demo F ([examples/abi](examples/abi)) checks Fe's ABI encoder and decoder
+against the layout in the Solidity ABI specification, computed independently
+in the test, across uint8 to uint256, int8 to int256 including MIN and MAX, the
+custom widths (uint24, int72, int248 and others), bool, address, `bytes`,
+`string`, `uint256[]`, static arrays and return values. 18,000 cases pass on
+both backends, so no bug was found. A mutation check shows the properties
+fail when a reference is wrong ([docs/abi.md](docs/abi.md)).
+
 ## The same idea from the CLI
 
 ```
@@ -411,6 +421,7 @@ examples/queue/             Demo B (state machine + plain properties)
 examples/contract/          Demo C (EVM contract via the Evm effect)
 examples/erc20/             Demo E (Fe's own ERC-20 fixture vs an ERC-20 model)
 examples/recipes/           Eight property patterns from docs/recipes.md
+examples/abi/               Demo F (Solidity ABI encode/decode vs the spec)
 examples/differential/      Demo D (Fe core arithmetic vs references, both backends)
 examples/differential_deep/ Demo D at 100x the case count, native only
 cli/                        native `fecheck` executable (Fe)
@@ -428,6 +439,7 @@ docs/                       architecture, compatibility, testing, limitations, s
 * [docs/first-test.md](docs/first-test.md): your first FeCheck test in five minutes
 * [docs/vs-hand-written.md](docs/vs-hand-written.md): the same bug, hand-written tests vs FeCheck
 * [docs/recipes.md](docs/recipes.md): eight property patterns, each a tested example
+* [docs/abi.md](docs/abi.md): Demo F, Fe's Solidity ABI against the specification
 * [docs/differential.md](docs/differential.md): Demo D, Fe's own arithmetic on EVM and native
 * [docs/testing.md](docs/testing.md): test inventory and recorded results
 * [docs/limitations.md](docs/limitations.md): known limitations and follow-up work

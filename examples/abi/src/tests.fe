@@ -1,0 +1,109 @@
+use fecheck::{Source, Config, check}
+use ingot::{
+    uints,
+    ints,
+    wide_ints,
+    custom_widths,
+    bool_and_address,
+    dynamic_bytes,
+    dynamic_array,
+    fixed_array,
+    return_values,
+}
+
+const CASES: u64 = 2000
+
+#[test]
+fn abi_uints() {
+    assert!(
+        check(
+            |src: mut Source| uints(mut src),
+            Config::new(seed: 1, cases: CASES),
+        ).passed(),
+    )
+}
+
+#[test]
+fn abi_ints() {
+    assert!(
+        check(
+            |src: mut Source| ints(mut src),
+            Config::new(seed: 2, cases: CASES),
+        ).passed(),
+    )
+}
+
+#[test]
+fn abi_wide_ints() {
+    assert!(
+        check(
+            |src: mut Source| wide_ints(mut src),
+            Config::new(seed: 3, cases: CASES),
+        ).passed(),
+    )
+}
+
+#[test]
+fn abi_custom_widths() {
+    assert!(
+        check(
+            |src: mut Source| custom_widths(mut src),
+            Config::new(seed: 4, cases: CASES),
+        )
+            .passed(),
+    )
+}
+
+#[test]
+fn abi_bool_and_address() {
+    assert!(
+        check(
+            |src: mut Source| bool_and_address(mut src),
+            Config::new(seed: 5, cases: CASES),
+        )
+            .passed(),
+    )
+}
+
+#[test]
+fn abi_dynamic_bytes() {
+    assert!(
+        check(
+            |src: mut Source| dynamic_bytes(mut src),
+            Config::new(seed: 6, cases: CASES),
+        )
+            .passed(),
+    )
+}
+
+#[test]
+fn abi_dynamic_array() {
+    assert!(
+        check(
+            |src: mut Source| dynamic_array(mut src),
+            Config::new(seed: 7, cases: CASES),
+        )
+            .passed(),
+    )
+}
+
+#[test]
+fn abi_fixed_array() {
+    assert!(
+        check(
+            |src: mut Source| fixed_array(mut src),
+            Config::new(seed: 8, cases: CASES),
+        ).passed(),
+    )
+}
+
+#[test]
+fn abi_return_values() {
+    assert!(
+        check(
+            |src: mut Source| return_values(mut src),
+            Config::new(seed: 9, cases: CASES),
+        )
+            .passed(),
+    )
+}

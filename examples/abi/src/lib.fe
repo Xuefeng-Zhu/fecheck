@@ -1,0 +1,437 @@
+// Demo F: Fe's Solidity ABI encoder and decoder (`core::abi`, `std::abi`)
+// against an independent reference.
+//
+// Each property encodes generated values with `encode_alloc<Sol, _>` (or
+// `encode_return_alloc`), checks every word of the output against the
+// layout the Solidity ABI specification gives, computed here by hand from
+// plain u256 arithmetic, and decodes the bytes back with `decode_input` (or
+// `decode_output`) expecting the original values.
+
+use core::MemVec
+use core::abi::{encode_alloc, encode_return_alloc, Bytes, DynString}
+use std::abi::{
+    Sol,
+    decode_input,
+    decode_output,
+    DynArray,
+    Uint24,
+    Uint160,
+    Uint248,
+    Int24,
+    Int72,
+    Int136,
+    Int248,
+}
+use fecheck::{Source, Verdict, ensure}
+
+pub const UINT_WORD: u64 = 1
+pub const UINT_DECODE: u64 = 2
+pub const INT_WORD: u64 = 3
+pub const INT_DECODE: u64 = 4
+pub const WIDE_WORD: u64 = 5
+pub const WIDE_DECODE: u64 = 6
+pub const CUSTOM_WORD: u64 = 7
+pub const CUSTOM_DECODE: u64 = 8
+pub const BOOL_ADDR_WORD: u64 = 9
+pub const BOOL_ADDR_DECODE: u64 = 10
+pub const BYTES_LAYOUT: u64 = 11
+pub const BYTES_DECODE: u64 = 12
+pub const ARRAY_LAYOUT: u64 = 13
+pub const ARRAY_DECODE: u64 = 14
+pub const FIXED_LAYOUT: u64 = 15
+pub const FIXED_DECODE: u64 = 16
+pub const OUTPUT_LAYOUT: u64 = 17
+pub const OUTPUT_DECODE: u64 = 18
+pub const SIZE: u64 = 19
+
+const MAX: u256 = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+// ------------------------------------------------------------ generators
+
+/// 2^bits - 1, by repeated doubling (no shift of a possibly-wide value).
+fn ones(_ bits: u64) -> u256 {
+    var m: u256 = 0
+    var i: u64 = 0
+    while i < bits {
+        m = m * 2 + 1
+        i += 1
+    }
+    m
+}
+
+/// An unsigned value of `bits` bits, edge-biased: 0, 1, the maximum, one
+/// below it, a single high bit, or a random word cut to size.
+pub fn uword(_ src: mut Source, _ bits: u64) -> u256 {
+    let max = ones(bits)
+    let shape = src.draw(5)
+    if shape == 0 { return 0 }
+    if shape == 1 { return 1 }
+    if shape == 2 { return max }
+    if shape == 3 {
+        return max - 1
+    }
+    if shape == 4 {
+        return max - (max >> 1)
+    }
+    let hi = src.draw(0xFFFFFFFFFFFFFFFF) as u256
+    let mid1 = src.draw(0xFFFFFFFFFFFFFFFF) as u256
+    let mid2 = src.draw(0xFFFFFFFFFFFFFFFF) as u256
+    let lo = src.draw(0xFFFFFFFFFFFFFFFF) as u256
+    (((hi * 0x10000000000000000 + mid1) * 0x10000000000000000 + mid2) * 0x10000000000000000 + lo)
+        & max
+}
+
+/// A signed value of `bits` bits (<= 64) as an i64, edge-biased.
+pub fn sword(_ src: mut Source, _ bits: u64) -> i64 {
+    // Bounds computed in i128 so that bits == 64 does not overflow.
+    let half_u: u128 = ones(bits - 1).downcast_saturate()
+    let half: i128 = half_u.downcast_saturate()
+    let max: i64 = half.downcast_saturate()
+    let min: i64 = (-half - 1).downcast_saturate()
+    let shape = src.draw(6)
+    if shape == 0 { return 0 }
+    if shape == 1 { return -1 }
+    if shape == 2 { return max }
+    if shape == 3 { return min }
+    if shape == 4 {
+        return min + 1
+    }
+    if shape == 5 { return 1 }
+    let raw = src.draw(0xFFFFFFFFFFFFFFFF)
+    let span: u64 = ones(bits - 1).downcast_saturate()
+    let mag: i64 = (raw % (span + 1)).downcast_saturate()
+    if src.draw_bool() { -mag - 1 } else { mag }
+}
+
+/// The ABI word for a signed value: two's complement over 256 bits.
+pub fn sword_ref(_ v: i64) -> u256 {
+    if v >= 0 {
+        let u: u64 = v.downcast_saturate()
+        u as u256
+    } else {
+        // v = -(k + 1) with k >= 0, and -(k+1) mod 2^256 = MAX - k.
+        let k: u64 = (-(v + 1)).downcast_saturate()
+        MAX - (k as u256)
+    }
+}
+
+// ------------------------------------------------------------ properties
+
+/// uint8..uint256: one word each, zero-extended; decodes back.
+pub fn uints(_ src: mut Source) -> Verdict {
+    let a = uword(mut src, 8)
+    let b = uword(mut src, 16)
+    let c = uword(mut src, 32)
+    let d = uword(mut src, 64)
+    let e = uword(mut src, 128)
+    let f = uword(mut src, 256)
+    let a8: u8 = a.downcast_saturate()
+    let b16: u16 = b.downcast_saturate()
+    let c32: u32 = c.downcast_saturate()
+    let d64: u64 = d.downcast_saturate()
+    let e128: u128 = e.downcast_saturate()
+    let buf = encode_alloc<Sol, (u8, u16, u32, u64, u128, u256)>((a8, b16, c32, d64, e128, f))
+    let s = buf.span()
+    if buf.len() != 192 {
+        return ensure(false, SIZE)
+    }
+    if s.word_at(0) != a
+        || s.word_at(32) != b
+        || s.word_at(64) != c
+        || s.word_at(96) != d
+        || s.word_at(128) != e
+        || s.word_at(160) != f {
+        return ensure(false, UINT_WORD)
+    }
+    let (ra, rb, rc, rd, re, rf): (u8, u16, u32, u64, u128, u256) = decode_input(buf.span())
+    ensure(
+        ra == a8 && rb == b16 && rc == c32 && rd == d64 && re == e128 && rf == f,
+        UINT_DECODE,
+    )
+}
+
+/// int8..int64: sign-extended to 256 bits; decodes back.
+pub fn ints(_ src: mut Source) -> Verdict {
+    let a = sword(mut src, 8)
+    let b = sword(mut src, 16)
+    let c = sword(mut src, 32)
+    let d = sword(mut src, 64)
+    let a8: i8 = a.downcast_saturate()
+    let b16: i16 = b.downcast_saturate()
+    let c32: i32 = c.downcast_saturate()
+    let buf = encode_alloc<Sol, (i8, i16, i32, i64)>((a8, b16, c32, d))
+    let s = buf.span()
+    if s.word_at(0) != sword_ref(a)
+        || s.word_at(32) != sword_ref(b)
+        || s.word_at(64) != sword_ref(c)
+        || s.word_at(96) != sword_ref(d) {
+        return ensure(false, INT_WORD)
+    }
+    let (ra, rb, rc, rd): (i8, i16, i32, i64) = decode_input(buf.span())
+    ensure(ra == a8 && rb == b16 && rc == c32 && rd == d, INT_DECODE)
+}
+
+/// int128 and int256, including their extremes, which do not fit an i64.
+pub fn wide_ints(_ src: mut Source) -> Verdict {
+    let pick = src.draw(2)
+    let base = sword(mut src, 64)
+    let i128_max: i128 = 170141183460469231731687303715884105727
+    var x: i128 = base as i128
+    var x_word: u256 = sword_ref(base)
+    if pick == 1 {
+        x = i128_max
+        x_word = ones(127)
+    } else if pick == 2 {
+        x = -i128_max - 1
+        x_word = MAX - ones(127)
+    }
+    let i256_max: i256 = 57896044618658097711785492504343953926634992332820282019728792003956564819967
+    var y: i256 = base as i256
+    var y_word: u256 = sword_ref(base)
+    let pick2 = src.draw(2)
+    if pick2 == 1 {
+        y = i256_max
+        y_word = ones(255)
+    } else if pick2 == 2 {
+        y = -i256_max - 1
+        y_word = MAX - ones(255)
+    }
+    let buf = encode_alloc<Sol, (i128, i256)>((x, y))
+    let s = buf.span()
+    if s.word_at(0) != x_word || s.word_at(32) != y_word {
+        return ensure(false, WIDE_WORD)
+    }
+    let (rx, ry): (i128, i256) = decode_input(buf.span())
+    ensure(rx == x && ry == y, WIDE_DECODE)
+}
+
+/// Solidity widths Fe has no native type for: uint24, uint160, uint248,
+/// int24, int72, int136, int248.
+pub fn custom_widths(_ src: mut Source) -> Verdict {
+    let u24 = uword(mut src, 24)
+    let u160 = uword(mut src, 160)
+    let u248 = uword(mut src, 248)
+    let s24 = sword(mut src, 24)
+    let s72 = sword(mut src, 64)
+    let s136 = sword(mut src, 64)
+    let s248 = sword(mut src, 64)
+    let value = (
+        Uint24 { val: u24.downcast_saturate() },
+        Uint160 { val: u160 },
+        Uint248 { val: u248 },
+        Int24 { val: s24.downcast_saturate() },
+        Int72 { val: s72 as i128 },
+        Int136 { val: s136 as i256 },
+        Int248 { val: s248 as i256 },
+    )
+    let buf = encode_alloc<Sol, (Uint24, Uint160, Uint248, Int24, Int72, Int136, Int248)>(value)
+    let s = buf.span()
+    if s.word_at(0) != u24
+        || s.word_at(32) != u160
+        || s.word_at(64) != u248
+        || s.word_at(96) != sword_ref(s24)
+        || s.word_at(128) != sword_ref(s72)
+        || s.word_at(160) != sword_ref(s136)
+        || s.word_at(192) != sword_ref(s248) {
+        return ensure(false, CUSTOM_WORD)
+    }
+    let (a, b, c, d, e, f, g): (
+        Uint24,
+        Uint160,
+        Uint248,
+        Int24,
+        Int72,
+        Int136,
+        Int248,
+    ) = decode_input(buf.span())
+    ensure(
+        a.val as u256 == u24
+            && b.val == u160
+            && c.val == u248
+            && d.val as i64 == s24
+            && e.val == s72 as i128
+            && f.val == s136 as i256
+            && g.val == s248 as i256,
+        CUSTOM_DECODE,
+    )
+}
+
+/// bool is 0 or 1; an address is its 160 bits, zero-extended.
+pub fn bool_and_address(_ src: mut Source) -> Verdict {
+    let flag = src.draw_bool()
+    let raw = uword(mut src, 160)
+    let addr = Address::new(raw)
+    let buf = encode_alloc<Sol, (bool, Address)>((flag, addr))
+    let s = buf.span()
+    let flag_word: u256 = if flag { 1 } else { 0 }
+    if s.word_at(0) != flag_word || s.word_at(32) != raw {
+        return ensure(false, BOOL_ADDR_WORD)
+    }
+    let (rf, ra): (bool, Address) = decode_input(buf.span())
+    ensure(rf == flag && ra == addr, BOOL_ADDR_DECODE)
+}
+
+/// (uint8, bytes, uint16, string): static heads, offsets to the tails, each
+/// tail a length word then the data left-aligned and zero-padded.
+pub fn dynamic_bytes(_ src: mut Source) -> Verdict {
+    let a = uword(mut src, 8)
+    let c = uword(mut src, 16)
+    let blen = src.draw(32)
+    let slen = src.draw(32)
+    let bword = uword(mut src, 256)
+    let sword_ = uword(mut src, 256)
+    let blen_u: usize = blen.downcast_saturate()
+    let slen_u: usize = slen.downcast_saturate()
+    let bytes = Bytes::from_word_prefix(word: bword, len: blen_u)
+    let text = DynString::from_word_prefix(word: sword_, len: slen_u)
+    // The first `len` bytes of `word`, the rest zero.
+    let bdata = if blen == 0 {
+        0
+    } else {
+        bword & (MAX - ones(256 - 8 * blen))
+    }
+    let sdata = if slen == 0 {
+        0
+    } else {
+        sword_ & (MAX - ones(256 - 8 * slen))
+    }
+    let a8: u8 = a.downcast_saturate()
+    let c16: u16 = c.downcast_saturate()
+    let buf = encode_alloc<Sol, (u8, Bytes, u16, DynString)>((a8, bytes.clone(), c16, text.clone()))
+    let s = buf.span()
+    // Head: 4 words. Bytes tail at 128: length, then one data word if any.
+    let b_words: u256 = if blen == 0 { 0 } else { 1 }
+    let s_off: u256 = 128 + 32 + 32 * b_words
+    let s_words: u256 = if slen == 0 { 0 } else { 1 }
+    let total: u256 = s_off + 32 + 32 * s_words
+    if buf.len() as u256 != total {
+        return ensure(false, SIZE)
+    }
+    if s.word_at(0) != a || s.word_at(32) != 128 || s.word_at(64) != c {
+        return ensure(false, BYTES_LAYOUT)
+    }
+    if s.word_at(96) != s_off
+        || s.word_at(128) != blen as u256
+        || s.word_at(s_off) != slen as u256 {
+        return ensure(false, BYTES_LAYOUT)
+    }
+    if blen > 0 && s.word_at(160) != bdata {
+        return ensure(false, BYTES_LAYOUT)
+    }
+    if slen > 0 && s.word_at(s_off + 32) != sdata {
+        return ensure(false, BYTES_LAYOUT)
+    }
+    let (ra, rb, rc, rs): (u8, Bytes, u16, DynString) = decode_input(buf.span())
+    ensure(
+        ra == a8 && rb == bytes && rc == c16 && rs == text,
+        BYTES_DECODE,
+    )
+}
+
+/// (uint256[], uint256): offset, then length and elements in the tail.
+pub fn dynamic_array(_ src: mut Source) -> Verdict {
+    let n = src.draw(5)
+    var vals: MemVec<u256> = MemVec::new()
+    var i: u64 = 0
+    while i < n {
+        vals.push(uword(mut src, 256))
+        i += 1
+    }
+    let after = uword(mut src, 256)
+    var expect: MemVec<u256> = MemVec::new()
+    var j: usize = 0
+    while j < vals.len() {
+        expect.push(vals[j])
+        j += 1
+    }
+    let arr: DynArray<u256> = DynArray::from_mem_vec(vals)
+    let buf = encode_alloc<Sol, (DynArray<u256>, u256)>((arr.clone(), after))
+    let s = buf.span()
+    let n256 = n as u256
+    if buf.len() as u256 != 96 + 32 * n256 {
+        return ensure(false, SIZE)
+    }
+    if s.word_at(0) != 64 || s.word_at(32) != after || s.word_at(64) != n256 {
+        return ensure(false, ARRAY_LAYOUT)
+    }
+    var k: usize = 0
+    var pos: u256 = 96
+    while k < expect.len() {
+        if s.word_at(pos) != expect[k] {
+            return ensure(false, ARRAY_LAYOUT)
+        }
+        k += 1
+        pos += 32
+    }
+    let (rarr, rafter): (DynArray<u256>, u256) = decode_input(buf.span())
+    if rafter != after || rarr.len() != expect.len() {
+        return ensure(false, ARRAY_DECODE)
+    }
+    var m: usize = 0
+    while m < expect.len() {
+        if rarr.get(m) != expect[m] {
+            return ensure(false, ARRAY_DECODE)
+        }
+        m += 1
+    }
+    Verdict::Pass
+}
+
+/// (uint16[3], int32): a static array is inline, one word per element.
+pub fn fixed_array(_ src: mut Source) -> Verdict {
+    let a = uword(mut src, 16)
+    let b = uword(mut src, 16)
+    let c = uword(mut src, 16)
+    let d = sword(mut src, 32)
+    let arr: [u16; 3] = [a.downcast_saturate(), b.downcast_saturate(), c.downcast_saturate()]
+    let d32: i32 = d.downcast_saturate()
+    let buf = encode_alloc<Sol, ([u16; 3], i32)>((arr, d32))
+    let s = buf.span()
+    if buf.len() != 128 {
+        return ensure(false, SIZE)
+    }
+    if s.word_at(0) != a
+        || s.word_at(32) != b
+        || s.word_at(64) != c
+        || s.word_at(96) != sword_ref(d) {
+        return ensure(false, FIXED_LAYOUT)
+    }
+    let (ra, rd): ([u16; 3], i32) = decode_input(buf.span())
+    ensure(
+        ra[0] == arr[0] && ra[1] == arr[1] && ra[2] == arr[2] && rd == d32,
+        FIXED_DECODE,
+    )
+}
+
+/// A single dynamic return value (`returns (bytes)`) starts with the offset
+/// word 0x20; a static one is just its word.
+pub fn return_values(_ src: mut Source) -> Verdict {
+    let len = src.draw(32)
+    let word = uword(mut src, 256)
+    let len_u: usize = len.downcast_saturate()
+    let bytes = Bytes::from_word_prefix(word: word, len: len_u)
+    let data = if len == 0 {
+        0
+    } else {
+        word & (MAX - ones(256 - 8 * len))
+    }
+    let buf = encode_return_alloc<Sol, Bytes>(bytes.clone())
+    let s = buf.span()
+    if s.word_at(0) != 32 || s.word_at(32) != len as u256 {
+        return ensure(false, OUTPUT_LAYOUT)
+    }
+    if len > 0 && s.word_at(64) != data {
+        return ensure(false, OUTPUT_LAYOUT)
+    }
+    let back: Bytes = decode_output(buf.span())
+    if back != bytes {
+        return ensure(false, OUTPUT_DECODE)
+    }
+    let v = uword(mut src, 256)
+    let sbuf = encode_return_alloc<Sol, u256>(v)
+    if sbuf.len() != 32 || sbuf.span().word_at(0) != v {
+        return ensure(false, OUTPUT_LAYOUT)
+    }
+    let vb: u256 = decode_output(sbuf.span())
+    ensure(vb == v, OUTPUT_DECODE)
+}

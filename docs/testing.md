@@ -19,10 +19,11 @@ fe test --backend native ingots/fecheck
 ./scripts/contract-demo.sh        # Demo C end to end
 fe test examples/differential     # Demo D on the EVM (and with --backend native)
 fe test examples/erc20            # Demo E: CoolCoin against an ERC-20 model
+fe test examples/abi              # Demo F: Fe's Solidity ABI encoder/decoder vs the spec
 fe test examples/recipes          # eight property patterns (docs/recipes.md)
 ./scripts/external-check.sh       # FeCheck from an ingot outside the repo
 ./scripts/cli-checks.sh           # after ./scripts/build.sh
-for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/external cli; do fe fmt --check "$d"; done
+for d in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/differential_deep examples/erc20 examples/recipes examples/abi examples/external cli; do fe fmt --check "$d"; done
 ```
 
 ## Results
@@ -36,11 +37,12 @@ for d in ingots/fecheck examples/permissions examples/queue examples/contract ex
 | `examples/erc20` (Demo E, `EffectfulMachine` and closure: 1,000 sequences each + mutant checks) | 13 passed | n/a (EVM contract) |
 | `examples/differential` (Demo D, 110,000 cases) | 29 passed | 29 passed (CI) |
 | `examples/differential_deep` (Demo D, 11,000,000 cases) | n/a (exceeds the EVM test gas cap) | 29 passed (CI) |
+| `examples/abi` (Demo F, Solidity ABI vs the spec, 18,000 cases) | 9 passed | 9 passed (CI) |
 | `examples/recipes` (eight property patterns) | 10 passed | 10 passed (CI) |
 | `examples/external` (copied outside the repo) | 5 passed (CI) | |
 | `scripts/contract-demo.sh` | shrunk case fails on Cached, passes on Fixed | |
 | `scripts/cli-checks.sh` (native CLI, built from the clone) | | 41 of 41 checks passed |
-| `fe fmt --check` (all ten ingots) | clean | |
+| `fe fmt --check` (all eleven ingots) | clean | |
 
 Native results come from GitHub Actions (`ubuntu-latest`, x86-64), which runs
 `./scripts/test.sh` on every push. Run

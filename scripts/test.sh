@@ -14,7 +14,7 @@ echo "== compiler"
 "$FE" --version
 
 echo "== fe test (Sonatina / EVM backend)"
-for ingot in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/erc20 examples/recipes; do
+for ingot in ingots/fecheck examples/permissions examples/queue examples/contract examples/differential examples/erc20 examples/recipes examples/abi; do
     echo "-- $ingot"
     "$FE" test "$ingot"
 done
@@ -36,7 +36,7 @@ if [ "${SKIP_NATIVE_TESTS:-0}" = "1" ]; then
     echo "== skipping fe test --backend native (SKIP_NATIVE_TESTS=1)"
 else
     echo "== fe test --backend native"
-    for ingot in ingots/fecheck examples/permissions examples/queue examples/differential examples/differential_deep examples/recipes; do
+    for ingot in ingots/fecheck examples/permissions examples/queue examples/differential examples/differential_deep examples/recipes examples/abi; do
         echo "-- $ingot"
         "$FE" test --backend native "$ingot"
     done

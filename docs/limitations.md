@@ -36,7 +36,7 @@ Living list. Items are honest constraints of the current implementation.
 * Command observations are compared with `Eq`; there is no generic diffing of
   model and SUT state.
 
-## Demos D and E
+## Demos D, E and F
 
 * Demo D (differential) found **no** Fe bug. It covers integer operators and
   `core::num` helpers only, not memory, storage, ABI encoding or control
@@ -51,6 +51,9 @@ Living list. Items are honest constraints of the current implementation.
   allowances and supply for three holders; it does not check events or
   `name`/`symbol`/`decimals`. Each test is capped at 200 sequences by the
   per-test gas limit, so five seeds give the 1,000.
+* Demo F (ABI) found no bug. It doesn't check rejection of non-canonical
+  input (a revert aborts the test), nested dynamic types, `bytes` longer than
+  32, or packed encoding ([abi.md](abi.md)).
 
 ## Tooling
 
