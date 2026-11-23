@@ -140,3 +140,24 @@ fn deep_div_i128_agrees() {
 fn deep_shift_u128_agrees() {
     assert!(passes(|src: mut Source| shift_u128_matches(mut src), 500))
 }
+
+#[test]
+fn deep_downcast_u256_agrees() {
+    assert!(
+        passes(|src: mut Source| downcast_u256_matches(mut src), 500),
+    )
+}
+
+#[test]
+fn deep_downcast_i256_agrees() {
+    assert!(
+        passes(|src: mut Source| downcast_i256_matches(mut src), 500),
+    )
+}
+
+#[test]
+fn deep_saturating_i64_agrees() {
+    assert!(
+        passes(|src: mut Source| saturating_i64_matches(mut src), 500),
+    )
+}
