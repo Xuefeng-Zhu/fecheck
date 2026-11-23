@@ -48,6 +48,21 @@ expect 4 "missing file"                       $BIN replay "$TMP/missing.case"
 expect 2 "--save and --json on one path"      $BIN run permissions --seed 12345 --save "$TMP/same" --json "$TMP/same"
 expect 6 "unwritable --save is not success"   $BIN run permissions --seed 12345 --save "$TMP/no/such/dir/p.case"
 
+expect 6 "unwritable replay JSON"             $BIN replay "$TMP/p.case" --against permissions-fixed --json "$TMP/no/such/dir/r.json"
+cp "$TMP/p.case" "$TMP/original.case"
+expect 2 "replay JSON cannot replace its input" $BIN replay "$TMP/p.case" --json "$TMP/p.case"
+expect 2 "equivalent relative paths"          $BIN replay "$TMP/p.case" --json "$TMP/./p.case"
+ln -s "$TMP/p.case" "$TMP/symlink"
+ln "$TMP/p.case" "$TMP/hardlink"
+expect 2 "symlink to replay input"            $BIN replay "$TMP/p.case" --json "$TMP/symlink"
+expect 2 "hard link to replay input"          $BIN replay "$TMP/p.case" --json "$TMP/hardlink"
+expect 0 "input case preserved byte for byte" cmp "$TMP/original.case" "$TMP/p.case"
+expect 2 "JSON collides with default case"    $BIN run permissions --dir "$TMP/default" --json "$TMP/default/./permissions.case"
+sed 's/^case [0-9]*/case 18446744073709551615/' "$TMP/p.case" > "$TMP/max-index.case"
+expect 0 "largest saved case index replays"   $BIN replay "$TMP/max-index.case"
+cp "$TMP/out.txt" "$TMP/out.txt.max-index"
+expect 0 "one-based case index has full precision" grep -q 'case 18446744073709551616)' "$TMP/out.txt.max-index"
+
 # Determinism: the same seed gives byte-identical output and case files.
 $BIN run permissions --seed 777 --save "$TMP/a.case" >"$TMP/a.txt"
 $BIN run permissions --seed 777 --save "$TMP/b.case" >"$TMP/b.txt"
@@ -61,11 +76,11 @@ fi
 # Damaged case files must be rejected, never replayed as a pass.
 head -n 5 "$TMP/p.case" > "$TMP/truncated.case"
 expect 4 "truncated case file"                $BIN replay "$TMP/truncated.case"
-sed 's/^fecheck-case 3/fecheck-case 9/' "$TMP/p.case" > "$TMP/schema.case"
+sed 's/^fecheck-case 4/fecheck-case 9/' "$TMP/p.case" > "$TMP/schema.case"
 expect 4 "unsupported schema version"         $BIN replay "$TMP/schema.case"
 sed 's/^choices \(.*\)/choices \1 x/' "$TMP/p.case" > "$TMP/badnum.case"
 expect 4 "non-numeric choice"                 $BIN replay "$TMP/badnum.case"
-sed '0,/^op /s/^op .*/op Execute(agent=3)/' "$TMP/p.case" > "$TMP/drift.case"
+sed '0,/^op /s/^op .*/op run "Execute(agent=3)"/' "$TMP/p.case" > "$TMP/drift.case"
 expect 4 "edited op line is reported as drift" $BIN replay "$TMP/drift.case"
 sed 's/^test .*/test some_other_test/' "$TMP/p.case" > "$TMP/unknown.case"
 expect 4 "unknown test identifier"            $BIN replay "$TMP/unknown.case"
@@ -112,6 +127,31 @@ if [ -n "$FE_EVM" ]; then
         else
             echo "FAIL printed $t regression"; sed 's/^/     | /' "$TMP/out.txt"; fail=1
         fi
+        if [ "$t" = permissions ]; then
+            # Compile the unchanged emitted regression against generator drift.
+            cp -R "$ROOT/examples/permissions" "$TMP/drift-permissions"
+            cp "$ing/fe.toml" "$TMP/original-ingot.toml"
+            python3 - "$ROOT" "$TMP/drift-permissions" "$ing" <<'PYTHON'
+from pathlib import Path
+import os, sys
+root, model, ingot = map(Path, sys.argv[1:])
+manifest = model / "fe.toml"
+manifest.write_text(manifest.read_text().replace("../../ingots/fecheck", os.path.relpath(root / "ingots/fecheck", model)))
+source = model / "src/machine.fe"
+old = "// Only an existing grant can be revoked."
+assert source.read_text().count(old) == 1
+source.write_text(source.read_text().replace(old, "if true { return false }"))
+manifest = ingot / "fe.toml"
+manifest.write_text(manifest.read_text().replace(os.path.relpath(root / "examples/permissions", ingot), os.path.relpath(model, ingot)))
+PYTHON
+            "$FE_EVM" test "$ing" >"$TMP/out.txt" 2>&1
+            if grep -q "0 passed; 1 failed" "$TMP/out.txt" && grep -q "^FAIL.*regression_" "$TMP/out.txt"; then
+                echo "ok   printed regression fails when recorded commands are skipped"
+            else
+                echo "FAIL printed regression with a changed precondition"; cat "$TMP/out.txt"; fail=1
+            fi
+            cp "$TMP/original-ingot.toml" "$ing/fe.toml"
+        fi
         sed -i 's/against_fixed()/against_cached()/; s/against_mod()/against_masked()/' "$ing/src/tests.fe"
         "$FE_EVM" test "$ing" >"$TMP/out.txt" 2>&1
         if grep -q "0 passed; 1 failed" "$TMP/out.txt" && grep -q "^FAIL.*regression_" "$TMP/out.txt"; then
@@ -124,7 +164,7 @@ fi
 
 # The JSON trace is valid JSON (checked with python when available).
 if command -v python3 >/dev/null; then
-    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schemaVersion"]==3 and d["maxSteps"]==40 and len(d["operations"])>0' "$TMP/p.json"; then
+    if python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["schemaVersion"]==4 and d["maxSteps"]==40 and len(d["operations"])>0' "$TMP/p.json"; then
         echo "ok   trace JSON parses"
     else
         echo "FAIL trace JSON"; fail=1

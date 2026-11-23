@@ -1,0 +1,62 @@
+use core::{MemBuffer, MemSpan}
+use fecheck::{Case, encode}
+
+/// The fixed implementation of the bundled test family, as a Fe expression.
+fn fixed_expr(_ target: MemSpan) -> MemBuffer {
+    if target.starts_with("permissions") {
+        format!("permissions::against_fixed()")
+    } else {
+        format!("queue::against_mod()")
+    }
+}
+
+/// Renders a compilable regression test for the bundled target. It passes
+/// against the fixed implementation and fails against the buggy one;
+/// `scripts/cli-checks.sh` compiles and runs it both ways.
+pub fn regression_text(_ case: Case) -> MemBuffer {
+    var out = MemBuffer::new(0)
+    let target = case.target.span()
+    let family = if target.starts_with("permissions") {
+        format!("permissions")
+    } else {
+        format!("queue")
+    }
+    writeln!(
+        mut out,
+        "Regression test (add to a test module of an ingot that depends on fecheck and ",
+        family,
+        "):",
+    )
+    writeln!(mut out, "  #[test]")
+    writeln!(
+        mut out,
+        "  fn regression_",
+        case.test,
+        "_seed_",
+        case.seed,
+        "() {",
+    )
+    let text = encode(case)
+    writeln!(mut out, "      var text = core::MemBuffer::new(0)")
+    for line in text.span().lines() {
+        var literal = MemBuffer::new(0)
+        fecheck::write_json_string(mut literal, line)
+        writeln!(mut out, "      writeln!(mut text, ", literal, ")")
+    }
+    writeln!(
+        mut out,
+        "      let case = match fecheck::decode(text.span()) { Result::Ok(c) => c, Result::Err(_) => panic() }",
+    )
+    writeln!(
+        mut out,
+        "      let (outcome, _) = fecheck::replay_machine(",
+        fixed_expr(target),
+        ", fecheck::case_steps(case), case)",
+    )
+    writeln!(
+        mut out,
+        "      assert!(match outcome { fecheck::ReplayOutcome::NoLongerFails => true, _ => false })",
+    )
+    writeln!(mut out, "  }")
+    out
+}

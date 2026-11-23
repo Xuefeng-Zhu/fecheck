@@ -21,6 +21,7 @@
 use core::{MemBuffer, MemSpan, MemVec}
 use std::env::Args
 use std::fs::Fs
+use std::process::{Spawn, Command, Status as ProcessStatus}
 use std::io::Stdout
 use fecheck::{
     Source,
@@ -62,6 +63,8 @@ const EXIT_NOT_REPRODUCED: i32 = 3
 const EXIT_BAD_CASE: i32 = 4
 const EXIT_DIFFERENT_FAILURE: i32 = 5
 const EXIT_WRITE_FAILED: i32 = 6
+const EXIT_GAVE_UP: i32 = 7
+const EXIT_UNSTABLE: i32 = 8
 
 /// Command-line options shared by the subcommands.
 struct Options {
@@ -76,7 +79,9 @@ struct Options {
     error: bool,
 }
 
-pub fn main() -> i32 uses (out: mut Stdout, args: Args, fs: mut Fs) {
+pub fn main() -> i32
+uses (out: mut Stdout, args: Args, fs: mut Fs, proc: mut Spawn)
+{
     if args.count() < 2 {
         usage()
         return EXIT_USAGE
@@ -144,7 +149,7 @@ fn usage() uses (out: mut Stdout) {
         "             4 bad case file or drift, 5 replay failed differently,",
     )
     println!(
-        "             6 the property failed but the case or JSON file could not be written",
+        "             6 output write failed, 7 too many discards, 8 unstable failure",
     )
 }
 
@@ -245,7 +250,7 @@ fn property_of(_ name: MemSpan) -> MemBuffer {
 }
 
 fn run_named(_ name: MemSpan, _ opts: Options) -> i32
-uses (out: mut Stdout, fs: mut Fs)
+uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
 {
     let s = steps(opts.max_steps, 12)
     if s.problem() != 0 {
@@ -284,7 +289,7 @@ fn run_machine<M: StateMachine + Copy>(
     _ target: own MemBuffer,
     _ opts: Options,
 ) -> i32
-uses (out: mut Stdout, fs: mut Fs)
+uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
 {
     var config = Config::new(seed: opts.seed, cases: opts.cases)
     if !opts.shrink {
@@ -304,49 +309,11 @@ uses (out: mut Stdout, fs: mut Fs)
     )
 
     let report = check(|src: mut Source| run_steps(machine, mut src, s), config)
-    match report.status {
-        Status::Passed => {
-            println!()
-            println!(
-                "Property passed: ",
-                report.passed,
-                " cases, ",
-                report.discarded,
-                " discarded.",
-            )
-            return EXIT_OK
+    match early_exit(report) {
+        Option::Some(code) => {
+            return code
         },
-        Status::InvalidConfig { problem } => {
-            println!()
-            println!(
-                "Invalid configuration (problem ",
-                problem,
-                "): --cases must be between 1 and 100000000.",
-            )
-            return EXIT_USAGE
-        },
-        Status::GaveUp => {
-            println!()
-            println!(
-                "Gave up: too many discarded cases (",
-                report.discarded,
-                ").",
-            )
-            return EXIT_FAILED
-        },
-        Status::Unstable => {
-            println!()
-            println!(
-                "Unstable: case ",
-                report.failing_case + 1,
-                " failed, then passed or failed differently when rerun on the same choices.",
-            )
-            println!(
-                "The test is nondeterministic; nothing was shrunk or saved.",
-            )
-            return EXIT_FAILED
-        },
-        Status::Failed => {},
+        Option::None => {},
     }
 
     // Trace the original and shrunk failures.
@@ -355,6 +322,10 @@ uses (out: mut Stdout, fs: mut Fs)
     var shrunk_src = Source::replay(copy_choices(report.shrunk), DEFAULT_MAX_CHOICES)
     let trace = run_traced(machine, mut shrunk_src, s)
 
+    if !shrunk_src.exact() || !trace.verdict.same_failure(report.shrunk_verdict) {
+        println!("Unstable: the traced replay did not confirm the failure.")
+        return EXIT_UNSTABLE
+    }
     println!()
     println!(
         "Property failed on case ",
@@ -381,7 +352,7 @@ uses (out: mut Stdout, fs: mut Fs)
         report.shrink.accepted,
         " accepted",
     )
-    if report.shrink.budget_exhausted {
+    if opts.shrink && report.shrink.budget_exhausted {
         println!(
             "          (shrink budget exhausted; the case may shrink further)",
         )
@@ -408,6 +379,9 @@ uses (out: mut Stdout, fs: mut Fs)
     if opts.save.len() == 0 {
         let _ = fs.create_dir_all(format!(opts.dir))
     }
+    if conflicting_paths(path.span(), opts.json.span()) {
+        return EXIT_USAGE
+    }
     var wrote = true
     match fs.write(format!(path), encode(case).span()) {
         Result::Ok(_) => {
@@ -422,15 +396,141 @@ uses (out: mut Stdout, fs: mut Fs)
         },
     }
     if opts.json.len() > 0 {
+        // A dangling symlink may have become resolvable when the case was created.
+        if wrote && conflicting_paths(path.span(), opts.json.span()) {
+            return EXIT_USAGE
+        }
         if !write_json(opts.json.span(), case, trace) {
             wrote = false
         }
     }
-    print_snippet(case, s)
+    print!(ingot::snippet::regression_text(case))
     if !wrote {
         return EXIT_WRITE_FAILED
     }
     EXIT_FAILED
+}
+
+/// Only a confirmed failure continues to the artifact writer.
+fn early_exit(_ report: Report) -> Option<i32> uses (out: mut Stdout) {
+    match report.status {
+        Status::Passed => {
+            println!()
+            println!(
+                "Property passed: ",
+                report.passed,
+                " cases, ",
+                report.discarded,
+                " discarded.",
+            )
+            Option::Some(EXIT_OK)
+        },
+        Status::InvalidConfig { problem } => {
+            println!()
+            println!(
+                "Invalid configuration (problem ",
+                problem,
+                "): --cases must be between 1 and 100000000.",
+            )
+            Option::Some(EXIT_USAGE)
+        },
+        Status::GaveUp => {
+            println!()
+            println!(
+                "Gave up: too many discarded cases (",
+                report.discarded,
+                ").",
+            )
+            Option::Some(EXIT_GAVE_UP)
+        },
+        Status::Unstable => {
+            println!()
+            println!(
+                "Unstable: case ",
+                report.failing_case + 1,
+                " did not replay with the recorded failure and exact choice consumption.",
+            )
+            println!("No reproducer was saved.")
+            Option::Some(EXIT_UNSTABLE)
+        },
+        Status::Failed => Option::None,
+    }
+}
+
+#[test]
+fn inconclusive_runs_have_distinct_cli_statuses() uses (out: mut Stdout) {
+    var config = Config::new(seed: 1, cases: 1)
+    config.max_discards = 0
+    let discarded = check(|src: mut Source| fecheck::Verdict::Discard, config)
+    assert!(early_exit(discarded) == Option::Some(7))
+    let unstable = check(
+        |src: mut Source| fecheck::ensure(src.is_replaying(), 7),
+        config,
+    )
+    assert!(early_exit(unstable) == Option::Some(8))
+}
+
+/// Resolve the parent as well, so two spellings of a new output compare equal.
+fn resolved_path(_ path: MemSpan) -> MemBuffer uses (fs: mut Fs) {
+    match fs.canonicalize(format!(path)) {
+        Result::Ok(full) => {
+            return full
+        },
+        _ => {},
+    }
+    var start = path.len()
+    while start > 0 && path[start - 1] != b'/' {
+        start -= 1
+    }
+    let parent = if start == 0 {
+        format!(".")
+    } else {
+        format!(path.slice(offset: 0, len: start))
+    }
+    match fs.canonicalize(parent) {
+        Result::Ok(dir) => format!(
+            dir,
+            "/",
+            path.slice(offset: start, len: path.len() - start),
+        ),
+        _ => format!(path),
+    }
+}
+
+/// canonicalize resolves symlinks. For existing names POSIX test -ef also
+/// compares device and inode, covering hard links. Arguments bypass the shell.
+fn conflicting_paths(_ case_path: MemSpan, _ json_path: MemSpan) -> bool
+uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
+{
+    if json_path.len() == 0 {
+        return false
+    }
+    var same = resolved_path(case_path) == resolved_path(json_path)
+    if !same && fs.metadata(format!(case_path)).is_ok() && fs.metadata(format!(json_path)).is_ok() {
+        let cmd = Command::new("/bin/test").arg(case_path).arg("-ef").arg(json_path)
+        match proc.output(cmd) {
+            Result::Ok(result) => {
+                match result.status {
+                    ProcessStatus::Exited(1) => {},
+                    ProcessStatus::Exited(0) => {
+                        same = true
+                    },
+                    _ => {
+                        println!("fecheck: could not verify output file identity")
+                        return true
+                    },
+                }
+            },
+            Result::Err(_) => {
+                println!("fecheck: could not verify output file identity")
+                return true
+            },
+        }
+    }
+    if same {
+        println!("fecheck: case and JSON paths must name different files")
+    }
+    same
 }
 
 fn write_json(_ path: MemSpan, _ case: Case, _ trace: Trace) -> bool
@@ -488,70 +588,6 @@ fn print_trace(_ heading: String<16>, _ trace: Trace) uses (out: mut Stdout) {
     }
 }
 
-/// The fixed and buggy implementations of a bundled target's test family,
-/// as Fe expressions.
-fn fixed_expr(_ target: MemSpan) -> MemBuffer {
-    if target.starts_with("permissions") {
-        format!("permissions::against_fixed()")
-    } else {
-        format!("queue::against_mod()")
-    }
-}
-
-fn buggy_expr(_ target: MemSpan) -> MemBuffer {
-    if target.starts_with("permissions") {
-        format!("permissions::against_cached()")
-    } else {
-        format!("queue::against_masked()")
-    }
-}
-
-/// Prints a compilable regression test for the bundled target. It passes
-/// against the fixed implementation and fails against the buggy one;
-/// `scripts/cli-checks.sh` compiles and runs it both ways.
-fn print_snippet(_ case: Case, _ s: Steps) uses (out: mut Stdout) {
-    let target = case.target.span()
-    let family = if target.starts_with("permissions") {
-        format!("permissions")
-    } else {
-        format!("queue")
-    }
-    println!(
-        "Regression test (add to a test module of an ingot that depends on fecheck and ",
-        family,
-        "):",
-    )
-    println!("  #[test]")
-    println!("  fn regression_", case.test, "_seed_", case.seed, "() {")
-    print!("      let choices = fecheck::choices_from([")
-    var first = true
-    for c in case.choices {
-        if !first { print!(", ") }
-        print!(c)
-        first = false
-    }
-    println!("])")
-    println!(
-        "      var src = fecheck::Source::replay(choices, fecheck::DEFAULT_MAX_CHOICES)",
-    )
-    println!(
-        "      // Passes on the fixed implementation; the same choices fail on ",
-        buggy_expr(target),
-        ".",
-    )
-    println!(
-        "      let verdict = fecheck::run_steps(",
-        fixed_expr(target),
-        ", mut src, fecheck::steps(",
-        s.max,
-        ", ",
-        s.mean,
-        "))",
-    )
-    println!("      assert!(verdict.is_pass())")
-    println!("  }")
-}
-
 fn describe_parse_error(_ e: ParseError) -> MemBuffer {
     var text = MemBuffer::new(0)
     e.describe(mut text)
@@ -559,9 +595,12 @@ fn describe_parse_error(_ e: ParseError) -> MemBuffer {
 }
 
 fn replay_file(_ path: MemSpan, _ opts: Options) -> i32
-uses (out: mut Stdout, fs: mut Fs)
+uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
 {
     header()
+    if conflicting_paths(path, opts.json.span()) {
+        return EXIT_USAGE
+    }
     let bytes = match fs.read(format!(path)) {
         Result::Ok(b) => b,
         Result::Err(e) => {
@@ -596,7 +635,7 @@ uses (out: mut Stdout, fs: mut Fs)
         ", seed ",
         case.seed,
         ", case ",
-        case.case_index + 1,
+        (case.case_index as u256) + 1,
         ")",
     )
     println!("Replaying against: ", target)
@@ -686,7 +725,9 @@ uses (out: mut Stdout, fs: mut Fs)
             copy_choices(case.choices),
             trace,
         )
-        let _ = write_json(opts.json.span(), replayed, trace)
+        if !write_json(opts.json.span(), replayed, trace) {
+            return EXIT_WRITE_FAILED
+        }
     }
     println!()
     match outcome {
@@ -740,7 +781,9 @@ uses (out: mut Stdout, fs: mut Fs)
 }
 
 /// The scripted end-to-end demonstration.
-fn demo(_ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
+fn demo(_ opts: Options) -> i32
+uses (out: mut Stdout, fs: mut Fs, proc: mut Spawn)
+{
     println!(
         "=== 1. Search: permissions system with a decision cache ===",
     )
@@ -768,7 +811,7 @@ fn demo(_ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
             "demo: expected FeCheck to find the cache bug with seed ",
             opts.seed,
         )
-        return EXIT_FAILED
+        return if found == EXIT_OK { EXIT_FAILED } else { found }
     }
     let case_path = format!(opts.dir, "/permissions.case")
     println!()
@@ -813,6 +856,13 @@ fn demo(_ opts: Options) -> i32 uses (out: mut Stdout, fs: mut Fs) {
         format!("queue"),
         run_opts,
     )
+    if queue_found != EXIT_FAILED {
+        return if queue_found == EXIT_OK {
+            EXIT_FAILED
+        } else {
+            queue_found
+        }
+    }
     let queue_case = format!(opts.dir, "/queue.case")
     println!()
     println!("=== 5. Replay the queue case against the fixed queue ===")
